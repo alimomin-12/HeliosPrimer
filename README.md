@@ -214,17 +214,6 @@ User input → AES-256 encrypt (ENCRYPTION_KEY) → dev.db
                                         Decrypt at runtime → AI API
 ```
 
-### What Is and Isn't Committed to Git
-
-| File | Committed? | Reason |
-|---|---|---|
-| `.env.local` | ❌ No | Contains `ENCRYPTION_KEY`, `NEXTAUTH_SECRET`, and email credentials — covered by `.env*` in `.gitignore` |
-| `prisma/dev.db` | ❌ No | Contains encrypted API keys — explicitly ignored via `prisma/*.db` in `.gitignore` |
-| `prisma/schema.prisma` | ✅ Yes | Schema definition only, no sensitive data |
-| All source code | ✅ Yes | No secrets are ever hardcoded in source |
-
-> **Important:** Each contributor must create their own `.env.local` with their own `ENCRYPTION_KEY` and `NEXTAUTH_SECRET`. Keys encrypted with one `ENCRYPTION_KEY` cannot be decrypted with another.
-
 ### For Contributors
 
 When you clone this repo, you will not have a database or environment file. Follow the [Getting Started](#-getting-started) steps to create your own local setup — your API keys will remain entirely on your own machine.
