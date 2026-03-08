@@ -287,7 +287,7 @@ function ChatContent() {
                     } else if (step.type === 'slave_response') {
                         setThinkingSteps((prev) => [
                             ...prev,
-                            { id: Date.now().toString(), role: 'slave', type: 'slave_response', content: step.content, provider: step.provider, question: step.question },
+                            { id: nextStepId(), role: 'slave', type: 'slave_response', content: step.content, provider: step.provider, question: step.question },
                         ]);
                     } else if (step.type === 'final') {
                         if (!finalStarted) {
