@@ -43,3 +43,6 @@ next-env.d.ts
 # prisma — local SQLite database (contains encrypted API keys, never commit)
 prisma/*.db
 prisma/*.db-journal
+prisma/*.db-shm
+prisma/*.db-wal
+

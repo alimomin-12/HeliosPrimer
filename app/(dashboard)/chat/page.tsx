@@ -33,6 +33,10 @@ interface TokenStats {
 
 const PROVIDER_ICONS: Record<string, string> = { OPENAI: '◎', GEMINI: '✦' };
 
+// Monotonic counter — avoids duplicate React keys when steps arrive in the same ms
+let __stepId = 0;
+function nextStepId() { return String(++__stepId); }
+
 // Rough token estimator: ~4 chars per token
 function estimateTokens(text: string): number {
     return Math.ceil(text.length / 4);
@@ -55,6 +59,7 @@ function ChatContent() {
     const [conversationId, setConversationId] = useState<string | null>(initConvId);
     const [showPanel, setShowPanel] = useState(true);
     const [loadingHistory, setLoadingHistory] = useState(false);
+    const [orchestrationError, setOrchestrationError] = useState<string | null>(null);
     const [tokenStats, setTokenStats] = useState<TokenStats>({ totalTokens: 0, contextMessages: 0, inputTokens: 0, outputTokens: 0 });
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -97,24 +102,38 @@ function ChatContent() {
             if (conv.mode) setMode(conv.mode as 'DIRECT' | 'ORCHESTRATED');
 
             // Map stored messages to ChatMessage format
-            const loaded: ChatMessage[] = conv.messages.map((m: { id: string; role: string; content: string; provider?: string }) => ({
-                id: m.id,
-                role: m.role === 'assistant' ? 'master' : m.role as ChatMessage['role'],
-                content: m.content,
-                provider: m.provider,
-                type: m.role === 'user' ? 'user' : 'final',
-            }));
+            // Filter out thinking-step messages (internal orchestration intermediates)
+            const loaded: ChatMessage[] = conv.messages
+                .filter((m: { thinkingStep?: boolean; role: string }) => !m.thinkingStep)
+                .map((m: { id: string; role: string; content: string; provider?: string }) => ({
+                    id: m.id,
+                    // DB stores 'master' for AI responses in both direct and orchestrated
+                    role: (m.role === 'master' || m.role === 'assistant') ? 'master' : m.role as ChatMessage['role'],
+                    content: m.content,
+                    provider: m.provider,
+                    type: m.role === 'user' ? 'user' : 'final',
+                }));
             setMessages(loaded);
 
             // If orchestrated, restore providers from config
             if (conv.orchestrationConfig) {
                 setMasterProvider(conv.orchestrationConfig.masterProvider);
-                setSlaveProviders(conv.orchestrationConfig.slaveProviders || []);
+                // slaveProviders is stored as JSON string in DB — must parse it
+                let slaves: string[] = [];
+                try {
+                    slaves = JSON.parse(conv.orchestrationConfig.slaveProviders || '[]');
+                } catch {
+                    slaves = [];
+                }
+                setSlaveProviders(slaves);
             }
+        } catch (err) {
+            console.error('[loadConversation] failed:', err);
         } finally {
             setLoadingHistory(false);
         }
     }, []);
+
 
     useEffect(() => {
         if (initConvId) {
@@ -234,10 +253,11 @@ function ChatContent() {
 
         const finalMsgId = Date.now().toString();
         let finalStarted = false;
+        setOrchestrationError(null);
 
         const decoder = new TextDecoder();
         let buffer = '';
-        while (true) {
+        outer: while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
@@ -246,18 +266,23 @@ function ChatContent() {
             for (const line of lines) {
                 if (!line.startsWith('data: ')) continue;
                 const data = line.slice(6);
-                if (data === '[DONE]') break;
+                if (data === '[DONE]') break outer;
                 try {
                     const step = JSON.parse(data);
-                    if (step.type === 'thinking') {
+                    if (step.type === 'error') {
+                        setOrchestrationError(step.content || 'Orchestration failed');
+                        // Remove the empty user message placeholder
+                        setMessages((prev) => prev.filter((m) => m.id !== finalMsgId));
+                        break outer;
+                    } else if (step.type === 'thinking') {
                         setThinkingSteps((prev) => [
                             ...prev,
-                            { id: Date.now().toString(), role: 'master', type: 'thinking', content: step.content, provider: step.provider },
+                            { id: nextStepId(), role: 'master', type: 'thinking', content: step.content, provider: step.provider },
                         ]);
                     } else if (step.type === 'delegation') {
                         setThinkingSteps((prev) => [
                             ...prev,
-                            { id: Date.now().toString(), role: 'system', type: 'delegation', content: step.content, delegateTo: step.delegateTo, question: step.question },
+                            { id: nextStepId(), role: 'system', type: 'delegation', content: step.content, delegateTo: step.delegateTo, question: step.question },
                         ]);
                     } else if (step.type === 'slave_response') {
                         setThinkingSteps((prev) => [
@@ -832,6 +857,24 @@ function ChatContent() {
                         <div className="fade-in-up">
                             <div className="loading-dots" style={{ padding: '8px 0' }}>
                                 <span /><span /><span />
+                            </div>
+                        </div>
+                    )}
+
+                    {orchestrationError && (
+                        <div className="fade-in-up" style={{ padding: '0 20px 16px' }}>
+                            <div
+                                style={{
+                                    background: 'rgba(239,68,68,0.08)',
+                                    border: '1px solid rgba(239,68,68,0.3)',
+                                    borderRadius: 12,
+                                    padding: '12px 16px',
+                                    color: '#f87171',
+                                    fontSize: '0.85rem',
+                                    lineHeight: 1.5,
+                                }}
+                            >
+                                <strong>⚠️ Orchestration Error:</strong> {orchestrationError}
                             </div>
                         </div>
                     )}

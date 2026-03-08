@@ -128,9 +128,12 @@ export async function POST(req: NextRequest) {
                 controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                 controller.close();
             } catch (err) {
-                console.error('Orchestration error:', err);
+                const errMsg = err instanceof Error ? err.message : String(err);
+                const errStack = err instanceof Error ? err.stack : '';
+                console.error('[Orchestration error]', errMsg);
+                console.error('[Orchestration stack]', errStack);
                 controller.enqueue(
-                    encoder.encode(`data: ${JSON.stringify({ type: 'error', content: 'Orchestration failed' })}\n\n`)
+                    encoder.encode(`data: ${JSON.stringify({ type: 'error', content: `Orchestration failed: ${errMsg}` })}\n\n`)
                 );
                 controller.close();
             }
