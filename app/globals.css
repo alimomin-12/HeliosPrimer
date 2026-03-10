@@ -25,7 +25,7 @@
 }
 
 /* ── LIGHT THEME ──────────────────────────────────────────────────────────── */
-[data-theme="light"] {
+:root[data-theme="light"] {
   --bg-primary: #f5f5fa;
   --bg-secondary: #ffffff;
   --bg-card: #ffffff;
@@ -46,7 +46,7 @@
 }
 
 /* ── NEON THEME ───────────────────────────────────────────────────────────── */
-[data-theme="neon"] {
+:root[data-theme="neon"] {
   --bg-primary: #060610;
   --bg-secondary: #08080f;
   --bg-card: #0b0b16;
@@ -67,7 +67,7 @@
 }
 
 /* ── GRAY THEME ───────────────────────────────────────────────────────────── */
-[data-theme="gray"] {
+:root[data-theme="gray"] {
   --bg-primary: #111114;
   --bg-secondary: #18181c;
   --bg-card: #1e1e23;
@@ -88,7 +88,7 @@
 }
 
 /* ── CORPORATE THEME ──────────────────────────────────────────────────────── */
-[data-theme="corporate"] {
+:root[data-theme="corporate"] {
   --bg-primary: #1a1b1f;
   --bg-secondary: #22242a;
   --bg-card: rgba(255,255,255,0.05);
@@ -108,25 +108,25 @@
   --theme-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.06);
 }
 
-/* ── SIMPLE THEME ─────────────────────────────────────────────────────────── */
-[data-theme="simple"] {
-  --bg-primary: #fafafa;
-  --bg-secondary: #f4f4f6;
+/* ── SIMPLE THEME (Warm Tones) ────────────────────────────────────────────── */
+:root[data-theme="simple"] {
+  --bg-primary: #fcf9f2;
+  --bg-secondary: #fdf5ea;
   --bg-card: #ffffff;
-  --bg-card-hover: #f0f0f2;
-  --border: #e8e8ec;
-  --border-bright: #d4d4da;
-  --text-primary: #1a1a1e;
-  --text-secondary: #6a6a76;
-  --text-muted: #a4a4ae;
-  --accent-purple: #4a4af0;
-  --accent-blue: #2a6ef0;
-  --accent-cyan: #0090c0;
-  --accent-green: #18a060;
-  --accent-pink: #d04090;
-  --openai-color: #18a060;
-  --gemini-color: #2a6ef0;
-  --theme-shadow: 0 2px 12px rgba(0,0,0,0.07);
+  --bg-card-hover: #fffbff;
+  --border: #eaddcf;
+  --border-bright: #d4c4b7;
+  --text-primary: #2e2824;
+  --text-secondary: #6e6359;
+  --text-muted: #9c9288;
+  --accent-purple: #e07a5f;
+  --accent-blue: #e8a56c;
+  --accent-cyan: #81b29a;
+  --accent-green: #8b9979;
+  --accent-pink: #d97777;
+  --openai-color: #81b29a;
+  --gemini-color: #e07a5f;
+  --theme-shadow: 0 4px 16px rgba(138, 112, 90, 0.12);
 }
 
 
@@ -166,7 +166,7 @@ body {
 
 /* Glass morphism card */
 .glass-card {
-  background: rgba(19, 19, 31, 0.8);
+  background: var(--bg-card);
   backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -177,9 +177,9 @@ body {
 }
 .glass-card-hover:hover {
   border-color: var(--border-bright);
-  background: rgba(26, 26, 46, 0.9);
+  background: var(--bg-card-hover);
   transform: translateY(-1px);
-  box-shadow: 0 8px 32px rgba(124, 92, 252, 0.1);
+  box-shadow: var(--theme-shadow);
 }
 
 /* Gradient text */
@@ -255,7 +255,7 @@ body {
 .btn-secondary:hover {
   border-color: var(--accent-purple);
   color: var(--accent-purple);
-  background: rgba(124, 92, 252, 0.05);
+  background: color-mix(in srgb, var(--accent-purple) 5%, transparent);
 }
 
 /* Input fields */
@@ -273,7 +273,7 @@ body {
 }
 .input-field:focus {
   border-color: var(--accent-purple);
-  box-shadow: 0 0 0 3px rgba(124, 92, 252, 0.1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-purple) 10%, transparent);
 }
 .input-field::placeholder {
   color: var(--text-muted);
@@ -400,9 +400,9 @@ body {
 }
 
 .bubble-thinking {
-  background: rgba(6, 182, 212, 0.05);
-  border: 1px solid rgba(6, 182, 212, 0.15);
-  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-card) 95%, transparent);
+  border: 1px solid var(--border-bright);
+  border-radius: 16px;
   padding: 12px 16px;
   color: var(--text-secondary);
   font-size: 0.85rem;

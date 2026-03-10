@@ -73,7 +73,7 @@ export default function DashboardPage() {
                     { label: 'Active AIs', value: connections.filter((c) => c.isActive).length, icon: '✅', color: '#10b981' },
                     { label: 'Conversations', value: conversations.length, icon: '💬', color: '#3b82f6' },
                 ].map((stat) => (
-                    <div key={stat.label} className="glass-card" style={{ padding: '22px 24px' }}>
+                    <div key={stat.label} className="glass-card" style={{ padding: '22px 24px', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                             <span style={{ fontSize: '1.4rem' }}>{stat.icon}</span>
                             <div
@@ -115,7 +115,7 @@ export default function DashboardPage() {
                             ))}
                         </div>
                     ) : connections.length === 0 ? (
-                        <div className="glass-card" style={{ padding: 32, textAlign: 'center' }}>
+                        <div className="glass-card" style={{ padding: 32, textAlign: 'center', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                             <div style={{ fontSize: '2rem', marginBottom: 12 }}>🔗</div>
                             <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 16 }}>
                                 No AIs connected yet
@@ -135,7 +135,7 @@ export default function DashboardPage() {
                                     <div
                                         key={conn.id}
                                         className="glass-card glass-card-hover"
-                                        style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}
+                                        style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14, background: 'var(--bg-card)', borderColor: 'var(--border)' }}
                                     >
                                         <div
                                             style={{
@@ -189,7 +189,7 @@ export default function DashboardPage() {
                             {[1, 2, 3].map((i) => <div key={i} className="shimmer" style={{ height: 68 }} />)}
                         </div>
                     ) : conversations.length === 0 ? (
-                        <div className="glass-card" style={{ padding: 32, textAlign: 'center' }}>
+                        <div className="glass-card" style={{ padding: 32, textAlign: 'center', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                             <div style={{ fontSize: '2rem', marginBottom: 12 }}>💬</div>
                             <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 16 }}>
                                 No conversations yet
@@ -206,7 +206,7 @@ export default function DashboardPage() {
                                     href={`/chat?id=${conv.id}`}
                                     style={{ textDecoration: 'none' }}
                                 >
-                                    <div className="glass-card glass-card-hover" style={{ padding: '14px 18px' }}>
+                                    <div className="glass-card glass-card-hover" style={{ padding: '14px 18px', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                             <span style={{ fontSize: '1rem' }}>{conv.mode === 'ORCHESTRATED' ? '🧠' : '💬'}</span>
                                             <div style={{ flex: 1, minWidth: 0 }}>

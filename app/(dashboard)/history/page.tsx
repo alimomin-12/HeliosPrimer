@@ -10,6 +10,8 @@ interface Conversation {
     updatedAt: string;
     messages: { content: string; role: string }[];
     orchestrationConfig?: { masterProvider: string; slaveProviders: string } | null;
+    totalTokens?: number;
+    messageCount?: number;
 }
 
 export default function HistoryPage() {
@@ -51,7 +53,7 @@ export default function HistoryPage() {
                     ))}
                 </div>
             ) : conversations.length === 0 ? (
-                <div className="glass-card" style={{ padding: 48, textAlign: 'center' }}>
+                <div className="glass-card" style={{ padding: 48, textAlign: 'center', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                     <div style={{ fontSize: '3rem', marginBottom: 20 }}>🕐</div>
                     <h2 style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700, marginBottom: 12 }}>
                         No conversations yet
@@ -71,7 +73,7 @@ export default function HistoryPage() {
                             : [];
                         return (
                             <Link key={conv.id} href={`/chat?id=${conv.id}`} style={{ textDecoration: 'none' }}>
-                                <div className="glass-card glass-card-hover" style={{ padding: '18px 22px' }}>
+                                <div className="glass-card glass-card-hover" style={{ padding: '18px 22px', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                                         <div
                                             style={{
@@ -79,8 +81,8 @@ export default function HistoryPage() {
                                                 height: 44,
                                                 borderRadius: 12,
                                                 background: conv.mode === 'ORCHESTRATED'
-                                                    ? 'rgba(124,92,252,0.15)'
-                                                    : 'rgba(59,130,246,0.15)',
+                                                    ? 'color-mix(in srgb, var(--accent-purple) 15%, transparent)'
+                                                    : 'color-mix(in srgb, var(--accent-blue) 15%, transparent)',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
@@ -111,9 +113,9 @@ export default function HistoryPage() {
                                                         borderRadius: 10,
                                                         fontWeight: 600,
                                                         background: conv.mode === 'ORCHESTRATED'
-                                                            ? 'rgba(124,92,252,0.15)'
-                                                            : 'rgba(59,130,246,0.15)',
-                                                        color: conv.mode === 'ORCHESTRATED' ? '#a78bfa' : '#60a5fa',
+                                                            ? 'color-mix(in srgb, var(--accent-purple) 15%, transparent)'
+                                                            : 'color-mix(in srgb, var(--accent-blue) 15%, transparent)',
+                                                        color: conv.mode === 'ORCHESTRATED' ? 'var(--accent-purple)' : 'var(--accent-blue)',
                                                     }}
                                                 >
                                                     {conv.mode === 'ORCHESTRATED'
@@ -129,7 +131,46 @@ export default function HistoryPage() {
                                                 </span>
                                             </div>
                                         </div>
-                                        <div style={{ color: 'var(--text-muted)', fontSize: '1rem' }}>→</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, opacity: 0.85 }}>
+                                                {conv.totalTokens !== undefined && (
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                                                            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                                                                {conv.totalTokens >= 1000 ? `${(conv.totalTokens / 1000).toFixed(1)}k` : conv.totalTokens} tokens
+                                                            </span>
+                                                            {conv.messageCount !== undefined && (
+                                                                <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>
+                                                                    {conv.messageCount} messages
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {/* Token infographic bar */}
+                                                        <div 
+                                                            style={{ 
+                                                                width: 32, 
+                                                                height: 6, 
+                                                                background: 'color-mix(in srgb, var(--text-muted) 20%, transparent)', 
+                                                                borderRadius: 4,
+                                                                overflow: 'hidden',
+                                                                position: 'relative'
+                                                            }}
+                                                        >
+                                                            <div 
+                                                                style={{
+                                                                    position: 'absolute',
+                                                                    top: 0, left: 0, bottom: 0,
+                                                                    width: `${Math.min(100, (conv.totalTokens / 32000) * 100)}%`,
+                                                                    background: conv.mode === 'ORCHESTRATED' ? 'var(--accent-purple)' : 'var(--accent-blue)',
+                                                                    borderRadius: 4
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div style={{ color: 'var(--text-muted)', fontSize: '1.1rem', opacity: 0.5, marginLeft: 8 }}>→</div>
+                                        </div>
                                     </div>
                                 </div>
                             </Link>

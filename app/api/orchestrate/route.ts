@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     // Save user message
     if (conversationId) {
         await prisma.message.create({
-            data: { conversationId, role: 'user', content: message },
+            data: { conversationId, role: 'user', content: typeof message === 'string' ? message : JSON.stringify(message) },
         });
         // Upsert orchestration config
         await prisma.orchestrationConfig.upsert({

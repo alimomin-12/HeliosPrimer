@@ -109,17 +109,17 @@ export default function LandingPage() {
             display: 'inline-flex',
             alignItems: 'center',
             gap: 8,
-            background: 'rgba(124,92,252,0.1)',
+            background: 'color-mix(in srgb, var(--accent-purple) 10%, transparent)',
             border: '1px solid rgba(124,92,252,0.3)',
             borderRadius: 20,
             padding: '6px 16px',
             fontSize: '0.8rem',
-            color: '#a78bfa',
+            color: 'var(--accent-purple)',
             marginBottom: 32,
             fontWeight: 500,
           }}
         >
-          <span className="pulse-dot" style={{ background: '#a78bfa' }} />
+          <span className="pulse-dot" style={{ background: 'var(--accent-purple)' }} />
           Multi-Agent AI Orchestration Platform
         </div>
 
@@ -235,12 +235,12 @@ export default function LandingPage() {
           }}
         >
           {FEATURES.map((f) => (
-            <div key={f.title} className="glass-card glass-card-hover" style={{ padding: 28 }}>
+            <div key={f.title} className="glass-card glass-card-hover" style={{ padding: 28, background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
               <div
                 style={{
                   fontSize: '2rem',
                   marginBottom: 16,
-                  background: 'rgba(124,92,252,0.1)',
+                  background: 'color-mix(in srgb, var(--accent-purple) 10%, transparent)',
                   width: 56,
                   height: 56,
                   borderRadius: 14,
@@ -271,7 +271,7 @@ export default function LandingPage() {
 
       {/* Orchestration diagram */}
       <section style={{ padding: '60px 48px', maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
-        <div className="glass-card" style={{ padding: '48px 32px' }}>
+        <div className="glass-card" style={{ padding: '48px 32px', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
           <h3
             style={{
               fontFamily: 'Space Grotesk, sans-serif',
@@ -295,7 +295,7 @@ export default function LandingPage() {
             {/* User node */}
             <div
               style={{
-                background: 'rgba(124,92,252,0.1)',
+                background: 'color-mix(in srgb, var(--accent-purple) 10%, transparent)',
                 border: '1px solid rgba(124,92,252,0.3)',
                 borderRadius: 14,
                 padding: '16px 24px',

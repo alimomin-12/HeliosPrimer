@@ -1,21 +1,31 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { AIAdapter, ChatMessage } from '../types';
+import type { AIAdapter, ChatMessage, ChatContentPart } from '../types';
 
 function toGeminiHistory(messages: ChatMessage[]) {
-    // Convert to Gemini format, skipping system messages (handled separately)
-    // Gemini requires strict alternating user/model turns
     const filtered = messages.filter((m) => m.role !== 'system');
 
-    // Merge consecutive same-role messages to avoid Gemini API errors
-    const merged: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
+    const merged: { role: 'user' | 'model'; parts: any[] }[] = [];
     for (const msg of filtered) {
         const geminiRole = msg.role === 'assistant' ? 'model' : 'user';
+        
+        const parts = Array.isArray(msg.content)
+            ? msg.content.map((part) => {
+                if (part.type === 'text') return { text: part.text };
+                if (part.type === 'image_url') {
+                    // Expecting data:image/png;base64,...
+                    const [header, data] = part.image_url.url.split(';base64,');
+                    const mimeType = header.split(':')[1];
+                    return { inlineData: { mimeType, data } };
+                }
+                return { text: '' };
+            })
+            : [{ text: msg.content }];
+
         const last = merged[merged.length - 1];
         if (last && last.role === geminiRole) {
-            // Merge into previous entry
-            last.parts[0].text += '\n' + msg.content;
+            last.parts.push(...parts);
         } else {
-            merged.push({ role: geminiRole, parts: [{ text: msg.content }] });
+            merged.push({ role: geminiRole, parts });
         }
     }
     return merged;
@@ -24,8 +34,25 @@ function toGeminiHistory(messages: ChatMessage[]) {
 function getSystemInstruction(messages: ChatMessage[]) {
     const systemMsg = messages.find((m) => m.role === 'system');
     if (!systemMsg) return undefined;
-    // Gemini SDK requires a Content object (role + parts) for systemInstruction
-    return { role: 'user' as const, parts: [{ text: systemMsg.content }] };
+    
+    const text = Array.isArray(systemMsg.content)
+        ? systemMsg.content.filter(p => p.type === 'text').map(p => (p as any).text).join('\n')
+        : systemMsg.content;
+        
+    return { role: 'user' as const, parts: [{ text }] };
+}
+
+function mapContentToGemini(content: string | ChatContentPart[]) {
+    if (typeof content === 'string') return content;
+    return content.map((part) => {
+        if (part.type === 'text') return { text: part.text };
+        if (part.type === 'image_url') {
+            const [header, data] = part.image_url.url.split(';base64,');
+            const mimeType = header.split(':')[1];
+            return { inlineData: { mimeType, data } };
+        }
+        return { text: '' };
+    });
 }
 
 export const geminiAdapter: AIAdapter = {
@@ -44,7 +71,7 @@ export const geminiAdapter: AIAdapter = {
         if (!lastMsg) throw new Error('No user message found in chat');
 
         const chat = geminiModel.startChat({ history });
-        const result = await chat.sendMessage(lastMsg.content);
+        const result = await chat.sendMessage(mapContentToGemini(lastMsg.content) as any);
         return result.response.text();
     },
 
@@ -62,7 +89,7 @@ export const geminiAdapter: AIAdapter = {
         if (!lastMsg) throw new Error('No user message found in streamChat');
 
         const chat = geminiModel.startChat({ history });
-        const result = await chat.sendMessageStream(lastMsg.content);
+        const result = await chat.sendMessageStream(mapContentToGemini(lastMsg.content) as any);
         for await (const chunk of result.stream) {
             const text = chunk.text();
             if (text) yield text;
