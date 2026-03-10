@@ -2,7 +2,9 @@
 
 @import "tailwindcss";
 
-:root {
+/* ── DEFAULT / DARK THEME ─────────────────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
   --bg-primary: #0a0a0f;
   --bg-secondary: #0f0f1a;
   --bg-card: #13131f;
@@ -19,7 +21,114 @@
   --accent-pink: #ec4899;
   --openai-color: #10a37f;
   --gemini-color: #4285f4;
+  --theme-shadow: 0 4px 24px rgba(0,0,0,0.5);
 }
+
+/* ── LIGHT THEME ──────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg-primary: #f5f5fa;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f0f0f8;
+  --border: #e2e2ec;
+  --border-bright: #c8c8dc;
+  --text-primary: #0f0f1a;
+  --text-secondary: #505070;
+  --text-muted: #9090a8;
+  --accent-purple: #6d4ae8;
+  --accent-blue: #2563eb;
+  --accent-cyan: #0891b2;
+  --accent-green: #059669;
+  --accent-pink: #db2777;
+  --openai-color: #0e9068;
+  --gemini-color: #1a73e8;
+  --theme-shadow: 0 4px 24px rgba(0,0,0,0.10);
+}
+
+/* ── NEON THEME ───────────────────────────────────────────────────────────── */
+[data-theme="neon"] {
+  --bg-primary: #060610;
+  --bg-secondary: #08080f;
+  --bg-card: #0b0b16;
+  --bg-card-hover: #10101e;
+  --border: #0e2a1a;
+  --border-bright: #0f4024;
+  --text-primary: #d0ffdc;
+  --text-secondary: #44ee88;
+  --text-muted: #1a7040;
+  --accent-purple: #ff00ff;
+  --accent-blue: #00e5ff;
+  --accent-cyan: #00ffcc;
+  --accent-green: #39ff14;
+  --accent-pink: #ff0080;
+  --openai-color: #39ff14;
+  --gemini-color: #00e5ff;
+  --theme-shadow: 0 4px 24px rgba(57,255,20,0.15);
+}
+
+/* ── GRAY THEME ───────────────────────────────────────────────────────────── */
+[data-theme="gray"] {
+  --bg-primary: #111114;
+  --bg-secondary: #18181c;
+  --bg-card: #1e1e23;
+  --bg-card-hover: #26262c;
+  --border: #2c2c33;
+  --border-bright: #3e3e48;
+  --text-primary: #e2e2e8;
+  --text-secondary: #8a8a96;
+  --text-muted: #55555f;
+  --accent-purple: #818cf8;
+  --accent-blue: #60a5fa;
+  --accent-cyan: #67e8f9;
+  --accent-green: #4ade80;
+  --accent-pink: #f472b6;
+  --openai-color: #4ade80;
+  --gemini-color: #60a5fa;
+  --theme-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+/* ── CORPORATE THEME ──────────────────────────────────────────────────────── */
+[data-theme="corporate"] {
+  --bg-primary: #1a1b1f;
+  --bg-secondary: #22242a;
+  --bg-card: rgba(255,255,255,0.05);
+  --bg-card-hover: rgba(255,255,255,0.09);
+  --border: rgba(255,255,255,0.07);
+  --border-bright: rgba(255,255,255,0.14);
+  --text-primary: #e2e2e6;
+  --text-secondary: #9a9aaa;
+  --text-muted: #5c5c6e;
+  --accent-purple: #a0a8c8;
+  --accent-blue: #7fa8d8;
+  --accent-cyan: #7eccc0;
+  --accent-green: #7dc4a0;
+  --accent-pink: #c4a0b8;
+  --openai-color: #7dc4a0;
+  --gemini-color: #7fa8d8;
+  --theme-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* ── SIMPLE THEME ─────────────────────────────────────────────────────────── */
+[data-theme="simple"] {
+  --bg-primary: #fafafa;
+  --bg-secondary: #f4f4f6;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f0f0f2;
+  --border: #e8e8ec;
+  --border-bright: #d4d4da;
+  --text-primary: #1a1a1e;
+  --text-secondary: #6a6a76;
+  --text-muted: #a4a4ae;
+  --accent-purple: #4a4af0;
+  --accent-blue: #2a6ef0;
+  --accent-cyan: #0090c0;
+  --accent-green: #18a060;
+  --accent-pink: #d04090;
+  --openai-color: #18a060;
+  --gemini-color: #2a6ef0;
+  --theme-shadow: 0 2px 12px rgba(0,0,0,0.07);
+}
+
 
 * {
   box-sizing: border-box;

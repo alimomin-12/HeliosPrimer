@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, Suspense, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PROVIDER_LABELS, PROVIDER_COLORS, type AIProvider } from '@/lib/ai/registry';
 import { extractArtifacts, downloadAsFile, downloadAsPdf, type Artifact } from '@/lib/artifacts';
+import { renderMarkdownText } from '@/lib/markdownRenderer';
 
 interface AIConnection {
     id: string;
@@ -32,7 +33,7 @@ interface TokenStats {
     outputTokens: number;
 }
 
-const PROVIDER_ICONS: Record<string, string> = { OPENAI: '◎', GEMINI: '✦' };
+const PROVIDER_ICONS: Record<string, string> = { OPENAI: '◎', GEMINI: '✦', QWEN: '⬡', DEEPSEEK: '🐋' };
 
 // Monotonic counter — avoids duplicate React keys when steps arrive in the same ms
 let __stepId = 0;
@@ -66,6 +67,19 @@ function ChatContent() {
     const [activeTab, setActiveTab] = useState<'chat' | 'artifacts'>('chat');
     const [expandedArtifact, setExpandedArtifact] = useState<string | null>(null);
     const [streamingDone, setStreamingDone] = useState(false);
+    const [outputLayout, setOutputLayout] = useState<'structured' | 'casual'>(() => {
+        if (typeof localStorage !== 'undefined') {
+            return (localStorage.getItem('heliosprimer-output-layout') as 'structured' | 'casual') || 'structured';
+        }
+        return 'structured';
+    });
+    const [researchMode, setResearchMode] = useState<boolean>(() => {
+        if (typeof localStorage !== 'undefined') {
+            return localStorage.getItem('heliosprimer-research-mode') === 'true';
+        }
+        return false;
+    });
+    const [showThinkingLogs, setShowThinkingLogs] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -283,6 +297,7 @@ function ChatContent() {
                 slaveProviders,
                 message: userMsg,
                 history,
+                researchMode,
             }),
         });
 
@@ -508,7 +523,13 @@ function ChatContent() {
                             {(['DIRECT', 'ORCHESTRATED'] as const).map((m) => (
                                 <button
                                     key={m}
-                                    onClick={() => setMode(m)}
+                                    onClick={() => {
+                                        setMode(m);
+                                        if (m === 'DIRECT' && researchMode) {
+                                            setResearchMode(false);
+                                            localStorage.setItem('heliosprimer-research-mode', 'false');
+                                        }
+                                    }}
                                     style={{
                                         flex: 1,
                                         padding: '7px 4px',
@@ -704,6 +725,95 @@ function ChatContent() {
                             </div>
                         )}
 
+                        {/* Research Mode Toggle */}
+                        <div style={{
+                            marginTop: 16,
+                            borderRadius: 10,
+                            border: researchMode
+                                ? '1.5px solid rgba(16,185,129,0.5)'
+                                : '1px solid var(--border)',
+                            background: researchMode
+                                ? 'rgba(16,185,129,0.07)'
+                                : 'var(--bg-card)',
+                            overflow: 'hidden',
+                            transition: 'all 0.2s ease',
+                        }}>
+                            <button
+                                onClick={() => {
+                                    const next = !researchMode;
+                                    setResearchMode(next);
+                                    localStorage.setItem('heliosprimer-research-mode', String(next));
+                                    if (next) setMode('ORCHESTRATED');
+                                }}
+                                style={{
+                                    width: '100%',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 10,
+                                    padding: '12px 14px',
+                                    background: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    textAlign: 'left',
+                                }}
+                            >
+                                {/* Toggle pill */}
+                                <div style={{
+                                    width: 38, height: 20, borderRadius: 10, flexShrink: 0,
+                                    background: researchMode ? '#10b981' : 'var(--border-bright)',
+                                    position: 'relative',
+                                    transition: 'background 0.2s',
+                                }}>
+                                    <div style={{
+                                        position: 'absolute',
+                                        top: 3, left: researchMode ? 20 : 3,
+                                        width: 14, height: 14, borderRadius: '50%',
+                                        background: 'white',
+                                        transition: 'left 0.2s',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                                    }} />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{
+                                        fontSize: '0.84rem',
+                                        fontWeight: 700,
+                                        color: researchMode ? '#10b981' : 'var(--text-primary)',
+                                        fontFamily: 'Space Grotesk, sans-serif',
+                                        display: 'flex', alignItems: 'center', gap: 6,
+                                    }}>
+                                        🔬 Research Mode
+                                        {researchMode && (
+                                            <span style={{
+                                                fontSize: '0.6rem', background: '#10b981',
+                                                color: 'white', borderRadius: 4, padding: '1px 6px', fontWeight: 700,
+                                            }}>ACTIVE</span>
+                                        )}
+                                    </div>
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.4 }}>
+                                        {researchMode
+                                            ? 'Multi-agent research with citations & structured document output'
+                                            : 'Enable for fact-based, cited research reports'}
+                                    </div>
+                                </div>
+                            </button>
+                            {researchMode && (
+                                <div style={{
+                                    padding: '0 14px 12px',
+                                    display: 'flex', flexDirection: 'column', gap: 4,
+                                }}>
+                                    {[
+                                        '📋 Master AI creates a research plan',
+                                        '🔍 Specialist agents gather cited facts',
+                                        '📄 Synthesised into a professional document',
+                                    ].map((item) => (
+                                        <div key={item} style={{ fontSize: '0.72rem', color: '#10b981', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                                            {item}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
                         {/* Token Stats Panel */}
                         {messages.length > 0 && (
                             <div
@@ -744,71 +854,6 @@ function ChatContent() {
                         )}
                     </div>
 
-                    {/* Orchestration steps (inner panel) */}
-                    {mode === 'ORCHESTRATED' && thinkingSteps.length > 0 && (
-                        <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
-                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                                🔍 Orchestration Log
-                            </div>
-                            {thinkingSteps.map((step) => (
-                                <div
-                                    key={step.id}
-                                    className="fade-in-up"
-                                    style={{ marginBottom: 10 }}
-                                >
-                                    {step.type === 'thinking' && (
-                                        <div
-                                            style={{
-                                                background: `${PROVIDER_COLORS[step.provider as AIProvider] || '#7c5cfc'}10`,
-                                                border: `1px solid ${PROVIDER_COLORS[step.provider as AIProvider] || '#7c5cfc'}25`,
-                                                borderRadius: 8,
-                                                padding: '8px 10px',
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 4, fontWeight: 600 }}>
-                                                {PROVIDER_ICONS[step.provider || '']} {step.provider} thinking
-                                            </div>
-                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.5, maxHeight: 80, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                {step.content.slice(0, 200)}{step.content.length > 200 ? '...' : ''}
-                                            </div>
-                                        </div>
-                                    )}
-                                    {step.type === 'delegation' && (
-                                        <div
-                                            style={{
-                                                background: 'rgba(124,92,252,0.08)',
-                                                border: '1px solid rgba(124,92,252,0.2)',
-                                                borderRadius: 8,
-                                                padding: '8px 10px',
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '0.68rem', color: '#a78bfa', fontWeight: 600, marginBottom: 3 }}>
-                                                → Delegating to {step.delegateTo}
-                                            </div>
-                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{step.question}</div>
-                                        </div>
-                                    )}
-                                    {step.type === 'slave_response' && (
-                                        <div
-                                            style={{
-                                                background: 'rgba(16,185,129,0.06)',
-                                                border: '1px solid rgba(16,185,129,0.2)',
-                                                borderRadius: 8,
-                                                padding: '8px 10px',
-                                            }}
-                                        >
-                                            <div style={{ fontSize: '0.68rem', color: '#10b981', fontWeight: 600, marginBottom: 3 }}>
-                                                {PROVIDER_ICONS[step.provider || '']} {step.provider} responded
-                                            </div>
-                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', maxHeight: 60, overflow: 'hidden' }}>
-                                                {step.content.slice(0, 150)}{step.content.length > 150 ? '...' : ''}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    )}
                 </div>
             )}
 
@@ -840,7 +885,7 @@ function ChatContent() {
                         {showPanel ? '◀' : '▶'}
                     </button>
 
-                    <div style={{ flex: 1, fontWeight: 600, fontSize: '0.9rem' }}>
+                    <div style={{ flex: 1, fontWeight: 600, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 10 }}>
                         {loadingHistory ? (
                             <span style={{ color: 'var(--text-muted)' }}>⏳ Loading conversation...</span>
                         ) : mode === 'DIRECT' ? (
@@ -851,9 +896,32 @@ function ChatContent() {
                         ) : (
                             <span>
                                 🧠 Orchestrated: {PROVIDER_ICONS[masterProvider]}{' '}
-                                {PROVIDER_LABELS[masterProvider as AIProvider] || masterProvider} (Master) +{' '}
-                                {slaveProviders.map((p) => `${PROVIDER_ICONS[p]} ${p}`).join(', ')} (Slave)
+                                {PROVIDER_LABELS[masterProvider as AIProvider] || masterProvider}
                             </span>
+                        )}
+
+                        {mode === 'ORCHESTRATED' && thinkingSteps.length > 0 && (
+                            <button
+                                onClick={() => setShowThinkingLogs(!showThinkingLogs)}
+                                style={{
+                                    padding: '4px 10px',
+                                    fontSize: '0.7rem',
+                                    borderRadius: 6,
+                                    border: showThinkingLogs ? '1px solid #7c5cfc' : '1px solid var(--border)',
+                                    background: showThinkingLogs ? 'rgba(124,92,252,0.15)' : 'var(--bg-card)',
+                                    color: showThinkingLogs ? '#7c5cfc' : 'var(--text-muted)',
+                                    cursor: 'pointer',
+                                    fontWeight: 700,
+                                    fontFamily: 'Inter, sans-serif',
+                                    transition: 'all 0.2s',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 5,
+                                }}
+                            >
+                                🔍 Orchestration Logs
+                                <span style={{ opacity: 0.6, fontSize: '0.65rem' }}>{thinkingSteps.length}</span>
+                            </button>
                         )}
                     </div>
 
@@ -912,6 +980,33 @@ function ChatContent() {
                         </div>
                     )}
 
+                    {/* Output layout toggle */}
+                    <div style={{ display: 'flex', borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                        {(['structured', 'casual'] as const).map((mode_) => (
+                            <button
+                                key={mode_}
+                                onClick={() => {
+                                    setOutputLayout(mode_);
+                                    localStorage.setItem('heliosprimer-output-layout', mode_);
+                                }}
+                                title={mode_ === 'structured' ? 'Structured: renders markdown with headings, lists, and formatting' : 'Casual: plain conversational text'}
+                                style={{
+                                    padding: '5px 10px',
+                                    fontSize: '0.7rem',
+                                    border: 'none',
+                                    background: outputLayout === mode_ ? 'var(--accent-purple)' : 'var(--bg-card)',
+                                    color: outputLayout === mode_ ? '#fff' : 'var(--text-muted)',
+                                    cursor: 'pointer',
+                                    fontWeight: 600,
+                                    fontFamily: 'Inter, sans-serif',
+                                    transition: 'all 0.15s',
+                                }}
+                            >
+                                {mode_ === 'structured' ? '⊞ Structured' : '✎ Casual'}
+                            </button>
+                        ))}
+                    </div>
+
                     <button
                         onClick={startNewChat}
                         className="btn-secondary"
@@ -922,11 +1017,130 @@ function ChatContent() {
                 </div>
 
                 {/* Chat or Artifacts panel */}
-                <div className="chat-messages" style={{ flex: 1, background: 'var(--bg-primary)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <div className="chat-messages" style={{ flex: 1, background: 'var(--bg-primary)', overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }}>
                     {activeTab === 'artifacts' ? (
                         <ArtifactPanel />
                     ) : (
                         <>
+                            {/* Orchestration Logs Overlay */}
+                            {mode === 'ORCHESTRATED' && showThinkingLogs && (
+                                <div
+                                    className="fade-in"
+                                    style={{
+                                        position: 'absolute',
+                                        top: 14,
+                                        right: 20,
+                                        width: 380,
+                                        maxHeight: 'calc(100% - 40px)',
+                                        background: 'rgba(15, 15, 20, 0.75)',
+                                        backdropFilter: 'blur(20px) saturate(180%)',
+                                        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                                        borderRadius: 20,
+                                        zIndex: 100,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        boxShadow: '0 20px 50px rgba(0,0,0,0.5), 0 0 20px rgba(124,92,252,0.1)',
+                                        overflow: 'hidden',
+                                    }}
+                                >
+                                    <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(124,92,252,0.05)' }}>
+                                        <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', fontFamily: 'Space Grotesk, sans-serif', letterSpacing: '0.02em', display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ fontSize: '1rem' }}>🔍</span> Orchestration Logs
+                                        </div>
+                                        <button
+                                            onClick={() => setShowThinkingLogs(false)}
+                                            style={{
+                                                background: 'rgba(255,255,255,0.05)',
+                                                border: 'none',
+                                                borderRadius: '50%',
+                                                width: 28,
+                                                height: 28,
+                                                color: 'var(--text-muted)',
+                                                cursor: 'pointer',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                fontSize: '0.8rem',
+                                                transition: 'all 0.2s',
+                                            }}
+                                            onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')}
+                                            onMouseOut={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
+
+                                    <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                        {thinkingSteps.map((step, idx) => (
+                                            <div
+                                                key={step.id}
+                                                className="fade-in-up"
+                                                style={{ animationDelay: `${idx * 0.05}s` }}
+                                            >
+                                                {step.type === 'thinking' && (
+                                                    <div
+                                                        style={{
+                                                            background: `${PROVIDER_COLORS[step.provider as AIProvider] || '#7c5cfc'}10`,
+                                                            border: `1px solid ${PROVIDER_COLORS[step.provider as AIProvider] || '#7c5cfc'}25`,
+                                                            borderRadius: 12,
+                                                            padding: '12px 14px',
+                                                        }}
+                                                    >
+                                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                            {PROVIDER_ICONS[step.provider || '']} {step.provider} <span style={{ opacity: 0.5, fontWeight: 400 }}>is thinking</span>
+                                                        </div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.8)', lineHeight: 1.6, fontFamily: 'Inter, sans-serif' }}>
+                                                            {step.content}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {step.type === 'delegation' && (
+                                                    <div
+                                                        style={{
+                                                            background: 'rgba(124,92,252,0.1)',
+                                                            border: '1px solid rgba(124,92,252,0.3)',
+                                                            borderRadius: 12,
+                                                            padding: '12px 14px',
+                                                        }}
+                                                    >
+                                                        <div style={{ fontSize: '0.7rem', color: '#a78bfa', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                                                            → Delegation
+                                                        </div>
+                                                        <div style={{ fontSize: '0.82rem', color: 'white', fontWeight: 600, marginBottom: 6 }}>
+                                                            Task for {step.delegateTo}:
+                                                        </div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>
+                                                            {step.question}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {step.type === 'slave_response' && (
+                                                    <div
+                                                        style={{
+                                                            background: 'rgba(16,185,129,0.08)',
+                                                            border: '1px solid rgba(16,185,129,0.3)',
+                                                            borderRadius: 12,
+                                                            padding: '12px 14px',
+                                                        }}
+                                                    >
+                                                        <div style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                            {PROVIDER_ICONS[step.provider || '']} {step.provider} <span style={{ opacity: 0.5, fontWeight: 400 }}>responded</span>
+                                                        </div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.8)', lineHeight: 1.6 }}>
+                                                            {step.content}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div style={{ padding: '12px 20px', background: 'rgba(0,0,0,0.2)', borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: '0.65rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                                        {thinkingSteps.length} orchestration events recorded
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Messages scroll area */}
                             <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 0' }}>
                                 {loadingHistory ? (
@@ -1052,10 +1266,14 @@ function ChatContent() {
                                                             while ((m = CODE_SPLIT.exec(src)) !== null) {
                                                                 // Text before this block
                                                                 if (m.index > lastIdx) {
+                                                                    const textSeg = src.slice(lastIdx, m.index);
                                                                     parts.push(
-                                                                        <span key={`txt-${blockIdx}`} style={{ whiteSpace: 'pre-wrap', display: 'block' }}>
-                                                                            {src.slice(lastIdx, m.index)}
-                                                                        </span>
+                                                                        <div key={`txt-${blockIdx}`}>
+                                                                            {outputLayout === 'structured'
+                                                                                ? renderMarkdownText(textSeg)
+                                                                                : <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{textSeg}</span>
+                                                                            }
+                                                                        </div>
                                                                     );
                                                                 }
                                                                 const lang = (m[1] || 'plaintext').trim().toLowerCase() || 'plaintext';
@@ -1144,13 +1362,21 @@ function ChatContent() {
                                                             }
                                                             // Remaining text after last block
                                                             if (lastIdx < src.length) {
+                                                                const tailSeg = src.slice(lastIdx);
                                                                 parts.push(
-                                                                    <span key="txt-tail" style={{ whiteSpace: 'pre-wrap', display: 'block' }}>
-                                                                        {src.slice(lastIdx)}
-                                                                    </span>
+                                                                    <div key="txt-tail">
+                                                                        {outputLayout === 'structured'
+                                                                            ? renderMarkdownText(tailSeg)
+                                                                            : <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{tailSeg}</span>
+                                                                        }
+                                                                    </div>
                                                                 );
                                                             }
-                                                            return parts.length > 0 ? parts : <span style={{ whiteSpace: 'pre-wrap' }}>{src}</span>;
+                                                            return parts.length > 0 ? parts : (
+                                                                outputLayout === 'structured'
+                                                                    ? renderMarkdownText(src)
+                                                                    : <span style={{ whiteSpace: 'pre-wrap' }}>{src}</span>
+                                                            );
                                                         })()}
                                                         {streaming && msg.id === messages[messages.length - 1]?.id && (
                                                             <span className="typing-cursor" />
