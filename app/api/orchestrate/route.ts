@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
         return new Response('Unauthorized', { status: 401 });
     }
 
-    const { conversationId, masterProvider, slaveProviders, message, history } = await req.json();
+    const { conversationId, masterProvider, slaveProviders, message, history, researchMode } = await req.json();
 
     // Fetch master connection
     const masterConn = await prisma.aIConnection.findUnique({
@@ -75,6 +75,7 @@ export async function POST(req: NextRequest) {
                     userQuery: message,
                     conversationHistory: (history || []) as ChatMessage[],
                     onStep: () => { },
+                    researchMode: !!researchMode,
                 });
 
                 for await (const step of gen) {

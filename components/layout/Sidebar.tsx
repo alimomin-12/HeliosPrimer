@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
+import ThemeSelector from '@/components/theme/ThemeSelector';
 
 const NAV_ITEMS = [
     { href: '/dashboard', label: 'Dashboard', icon: '⊞' },
@@ -85,14 +86,26 @@ export default function Sidebar() {
                 })}
             </nav>
 
-            {/* User section */}
+            {/* User / Theme section */}
             <div style={{ padding: '12px', borderTop: '1px solid var(--border)' }}>
+                {/* Theme label */}
+                <div style={{
+                    fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.06em',
+                    textTransform: 'uppercase', color: 'var(--text-muted)',
+                    padding: '0 4px', marginBottom: 6,
+                }}>
+                    🎨 Theme
+                </div>
+                <ThemeSelector />
+
+                {/* User card */}
                 <div
                     style={{
                         background: 'var(--bg-card)',
                         borderRadius: 12,
                         padding: '12px',
                         marginBottom: 8,
+                        marginTop: 8,
                     }}
                 >
                     <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: 2 }}>
