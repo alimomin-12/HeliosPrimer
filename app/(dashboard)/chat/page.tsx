@@ -14,10 +14,16 @@ interface AIConnection {
     label: string | null;
 }
 
+interface ChatContentPart {
+    type: 'text' | 'image_url';
+    text?: string;
+    image_url?: { url: string };
+}
+
 interface ChatMessage {
     id: string;
     role: 'user' | 'master' | 'slave' | 'system';
-    content: string;
+    content: string | ChatContentPart[];
     provider?: string;
     thinkingStep?: boolean;
     type?: 'thinking' | 'delegation' | 'slave_response' | 'final' | 'user';
@@ -40,8 +46,17 @@ let __stepId = 0;
 function nextStepId() { return String(++__stepId); }
 
 // Rough token estimator: ~4 chars per token
-function estimateTokens(text: string): number {
-    return Math.ceil(text.length / 4);
+function estimateTokens(content: string | ChatContentPart[]): number {
+    if (typeof content === 'string') return Math.ceil(content.length / 4);
+    let total = 0;
+    for (const part of content) {
+        if (part.type === 'text' && part.text) {
+            total += Math.ceil(part.text.length / 4);
+        } else if (part.type === 'image_url') {
+            total += 85; // Rough estimate for an image
+        }
+    }
+    return total;
 }
 
 function ChatContent() {
@@ -80,14 +95,53 @@ function ChatContent() {
         return false;
     });
     const [showThinkingLogs, setShowThinkingLogs] = useState(false);
+    const [attachments, setAttachments] = useState<{ name: string; type: string; data: string; isImage: boolean }[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const getTextContent = (content: string | ChatContentPart[]): string => {
+        if (typeof content === 'string') return content;
+        return content
+            .filter((p) => p.type === 'text')
+            .map((p) => p.text)
+            .join('\n');
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length === 0) return;
+
+        const newAttachments = await Promise.all(
+            files.map(async (file) => {
+                return new Promise<{ name: string; type: string; data: string; isImage: boolean }>((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        resolve({
+                            name: file.name,
+                            type: file.type,
+                            data: ev.target?.result as string,
+                            isImage: file.type.startsWith('image/'),
+                        });
+                    };
+                    reader.readAsDataURL(file);
+                });
+            })
+        );
+
+        setAttachments((prev) => [...prev, ...newAttachments]);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const removeAttachment = (index: number) => {
+        setAttachments((prev) => prev.filter((_, i) => i !== index));
+    };
 
     // Update token stats whenever messages change
     useEffect(() => {
-        const allText = messages.map((m) => m.content).join('');
-        const inputText = messages.filter((m) => m.role === 'user').map((m) => m.content).join('');
-        const outputText = messages.filter((m) => m.role !== 'user').map((m) => m.content).join('');
+        const allText = messages.map((m) => getTextContent(m.content)).join('');
+        const inputText = messages.filter((m) => m.role === 'user').map((m) => getTextContent(m.content)).join('');
+        const outputText = messages.filter((m) => m.role !== 'user').map((m) => getTextContent(m.content)).join('');
         setTokenStats({
             totalTokens: estimateTokens(allText),
             contextMessages: messages.length,
@@ -103,7 +157,7 @@ function ChatContent() {
         // Get the last master message (the most recent AI response)
         const lastMaster = [...messages].reverse().find((m) => m.role === 'master' && m.type === 'final');
         if (!lastMaster || !lastMaster.content) return;
-        const found = extractArtifacts(lastMaster.id, lastMaster.content);
+        const found = extractArtifacts(lastMaster.id, getTextContent(lastMaster.content));
         if (found.length === 0) return;
         setArtifacts((prev) => {
             const existingIds = new Set(prev.map((a) => a.id));
@@ -140,23 +194,38 @@ function ChatContent() {
             // Filter out thinking-step messages (internal orchestration intermediates)
             const loaded: ChatMessage[] = conv.messages
                 .filter((m: { thinkingStep?: boolean; role: string }) => !m.thinkingStep)
-                .map((m: { id: string; role: string; content: string; provider?: string }) => ({
-                    id: m.id,
-                    // DB stores 'master' for AI responses in both direct and orchestrated
-                    role: (m.role === 'master' || m.role === 'assistant') ? 'master' : m.role as ChatMessage['role'],
-                    content: m.content,
-                    provider: m.provider,
-                    type: m.role === 'user' ? 'user' : 'final',
-                }));
+                .map((m: { id: string; role: string; content: string; provider?: string }) => {
+                    let parsedContent: string | ChatContentPart[] = m.content;
+                    // Attempt to parse JSON content (for multi-modal messages)
+                    try {
+                        if (m.content.trim().startsWith('[') && m.content.trim().endsWith(']')) {
+                            const parsed = JSON.parse(m.content);
+                            if (Array.isArray(parsed)) {
+                                parsedContent = parsed as ChatContentPart[];
+                            }
+                        }
+                    } catch {
+                        // Ignore, content is just a regular string
+                    }
+
+                    return {
+                        id: m.id,
+                        // DB stores 'master' for AI responses in both direct and orchestrated
+                        role: (m.role === 'master' || m.role === 'assistant') ? 'master' : m.role as ChatMessage['role'],
+                        content: parsedContent,
+                        provider: m.provider,
+                        type: m.role === 'user' ? 'user' : 'final',
+                    };
+                });
             setMessages(loaded);
 
             // Extract artifacts from all AI messages in the loaded conversation
             const historyArtifacts: Artifact[] = [];
             const seenIds = new Set<string>();
             for (const m of loaded) {
-                if (m.role !== 'user' && m.content) {
-                    const found = extractArtifacts(m.id, m.content);
-                    for (const a of found) {
+                if (m.role === 'master' && m.type === 'final') {
+                    const arts = extractArtifacts(m.id, getTextContent(m.content));
+                    for (const a of arts) {
                         if (!seenIds.has(a.id)) {
                             seenIds.add(a.id);
                             historyArtifacts.push(a);
@@ -217,10 +286,20 @@ function ChatContent() {
         const userChatMsg: ChatMessage = {
             id: Date.now().toString(),
             role: 'user',
-            content: userMsg,
+            content: attachments.length > 0
+                ? [
+                      { type: 'text', text: userMsg },
+                      ...attachments.map(a => 
+                          a.isImage 
+                          ? { type: 'image_url' as const, image_url: { url: a.data } }
+                          : { type: 'text' as const, text: `[ATTACHMENT:${a.name};type=${a.type};data=${a.data}]` }
+                      )
+                  ]
+                : userMsg,
             type: 'user',
         };
         setMessages((prev) => [...prev, userChatMsg]);
+        setAttachments([]);
         setThinkingSteps([]);
 
         const convId = await ensureConversation();
@@ -233,16 +312,16 @@ function ChatContent() {
             }));
 
         if (mode === 'DIRECT') {
-            await runDirectChat(userMsg, convId, history);
+            await runDirectChat(userChatMsg.content, convId, history);
         } else {
-            await runOrchestratedChat(userMsg, convId, history);
+            await runOrchestratedChat(userChatMsg.content, convId, history);
         }
 
         setStreaming(false);
         setStreamingDone(true);
     }
 
-    async function runDirectChat(userMsg: string, convId: string, history: { role: string; content: string }[]) {
+    async function runDirectChat(userMsg: string | ChatContentPart[], convId: string, history: { role: string; content: string | ChatContentPart[] }[]) {
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -287,7 +366,7 @@ function ChatContent() {
         }
     }
 
-    async function runOrchestratedChat(userMsg: string, convId: string, history: { role: string; content: string }[]) {
+    async function runOrchestratedChat(userMsg: string | ChatContentPart[], convId: string, history: { role: string; content: string | ChatContentPart[] }[]) {
         const res = await fetch('/api/orchestrate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -427,7 +506,7 @@ function ChatContent() {
                             <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontWeight: 600, fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</div>
                                 <div style={{ fontSize: '0.70rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                                    <span style={{ background: 'rgba(124,92,252,0.12)', color: '#7c5cfc', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>{a.language}</span>
+                                    <span style={{ background: 'color-mix(in srgb, var(--accent-purple) 12%, transparent)', color: 'var(--accent-purple)', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>{a.language}</span>
                                     <span style={{ marginLeft: 8 }}>{a.content.split('\n').length} lines</span>
                                     <span style={{ marginLeft: 8 }}>·</span>
                                     <span style={{ marginLeft: 8 }}>{new Date(a.createdAt).toLocaleTimeString()}</span>
@@ -484,7 +563,7 @@ function ChatContent() {
                                 onClick={() => downloadAsPdf(a)}
                                 style={{
                                     padding: '5px 12px', fontSize: '0.72rem', borderRadius: 6, border: '1px solid rgba(124,92,252,0.4)',
-                                    background: 'rgba(124,92,252,0.08)', color: '#7c5cfc', cursor: 'pointer',
+                                    background: 'color-mix(in srgb, var(--accent-purple) 8%, transparent)', color: 'var(--accent-purple)', cursor: 'pointer',
                                     fontFamily: 'Inter, sans-serif', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5,
                                 }}
                             >
@@ -556,7 +635,7 @@ function ChatContent() {
                                     AI Provider
                                 </div>
                                 {activeConns.map((conn) => {
-                                    const color = PROVIDER_COLORS[conn.provider as AIProvider] || '#7c5cfc';
+                                    const color = PROVIDER_COLORS[conn.provider as AIProvider] || 'var(--accent-purple)';
                                     const active = selectedProvider === conn.provider;
                                     return (
                                         <button
@@ -596,7 +675,7 @@ function ChatContent() {
                                     Master AI (leads)
                                 </div>
                                 {activeConns.map((conn) => {
-                                    const color = PROVIDER_COLORS[conn.provider as AIProvider] || '#7c5cfc';
+                                    const color = PROVIDER_COLORS[conn.provider as AIProvider] || 'var(--accent-purple)';
                                     const active = masterProvider === conn.provider;
                                     return (
                                         <button
@@ -828,7 +907,7 @@ function ChatContent() {
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                                     {[
-                                        { label: 'Total Tokens', value: tokenStats.totalTokens.toLocaleString(), color: '#7c5cfc' },
+                                        { label: 'Total Tokens', value: tokenStats.totalTokens.toLocaleString(), color: 'var(--accent-purple)' },
                                         { label: 'Context Msgs', value: tokenStats.contextMessages.toString(), color: '#3b82f6' },
                                         { label: 'Input Tokens', value: tokenStats.inputTokens.toLocaleString(), color: '#10b981' },
                                         { label: 'Output Tokens', value: tokenStats.outputTokens.toLocaleString(), color: '#f59e0b' },
@@ -908,8 +987,8 @@ function ChatContent() {
                                     fontSize: '0.7rem',
                                     borderRadius: 6,
                                     border: showThinkingLogs ? '1px solid #7c5cfc' : '1px solid var(--border)',
-                                    background: showThinkingLogs ? 'rgba(124,92,252,0.15)' : 'var(--bg-card)',
-                                    color: showThinkingLogs ? '#7c5cfc' : 'var(--text-muted)',
+                                    background: showThinkingLogs ? 'color-mix(in srgb, var(--accent-purple) 15%, transparent)' : 'var(--bg-card)',
+                                    color: showThinkingLogs ? 'var(--accent-purple)' : 'var(--text-muted)',
                                     cursor: 'pointer',
                                     fontWeight: 700,
                                     fontFamily: 'Inter, sans-serif',
@@ -934,8 +1013,8 @@ function ChatContent() {
                                 fontSize: '0.72rem',
                                 borderRadius: 8,
                                 border: activeTab === 'artifacts' ? '1px solid #7c5cfc' : '1px solid var(--border)',
-                                background: activeTab === 'artifacts' ? 'rgba(124,92,252,0.12)' : 'var(--bg-card)',
-                                color: activeTab === 'artifacts' ? '#7c5cfc' : 'var(--text-muted)',
+                                background: activeTab === 'artifacts' ? 'color-mix(in srgb, var(--accent-purple) 12%, transparent)' : 'var(--bg-card)',
+                                color: activeTab === 'artifacts' ? 'var(--accent-purple)' : 'var(--text-muted)',
                                 cursor: 'pointer',
                                 fontFamily: 'Inter, sans-serif',
                                 fontWeight: 600,
@@ -947,7 +1026,7 @@ function ChatContent() {
                         >
                             📦 Artifacts
                             <span style={{
-                                background: '#7c5cfc',
+                                background: 'var(--accent-purple)',
                                 color: 'white',
                                 borderRadius: 10,
                                 padding: '1px 6px',
@@ -974,7 +1053,7 @@ function ChatContent() {
                                 padding: '5px 10px',
                             }}
                         >
-                            <span>🪙 <strong style={{ color: '#7c5cfc' }}>{tokenStats.totalTokens.toLocaleString()}</strong> tokens</span>
+                            <span>🪙 <strong style={{ color: 'var(--accent-purple)' }}>{tokenStats.totalTokens.toLocaleString()}</strong> tokens</span>
                             <span style={{ color: 'var(--border)' }}>|</span>
                             <span>📨 <strong style={{ color: '#3b82f6' }}>{tokenStats.contextMessages}</strong> msgs</span>
                         </div>
@@ -1040,11 +1119,11 @@ function ChatContent() {
                                         zIndex: 100,
                                         display: 'flex',
                                         flexDirection: 'column',
-                                        boxShadow: '0 20px 50px rgba(0,0,0,0.5), 0 0 20px rgba(124,92,252,0.1)',
+                                        boxShadow: 'var(--theme-shadow)',
                                         overflow: 'hidden',
                                     }}
                                 >
-                                    <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(124,92,252,0.05)' }}>
+                                    <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'color-mix(in srgb, var(--accent-purple) 5%, transparent)' }}>
                                         <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'white', fontFamily: 'Space Grotesk, sans-serif', letterSpacing: '0.02em', display: 'flex', alignItems: 'center', gap: 8 }}>
                                             <span style={{ fontSize: '1rem' }}>🔍</span> Orchestration Logs
                                         </div>
@@ -1064,7 +1143,7 @@ function ChatContent() {
                                                 fontSize: '0.8rem',
                                                 transition: 'all 0.2s',
                                             }}
-                                            onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')}
+                                            onMouseOver={(e) => (e.currentTarget.style.background = 'var(--border-bright)')}
                                             onMouseOut={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
                                         >
                                             ✕
@@ -1081,8 +1160,8 @@ function ChatContent() {
                                                 {step.type === 'thinking' && (
                                                     <div
                                                         style={{
-                                                            background: `${PROVIDER_COLORS[step.provider as AIProvider] || '#7c5cfc'}10`,
-                                                            border: `1px solid ${PROVIDER_COLORS[step.provider as AIProvider] || '#7c5cfc'}25`,
+                                                            background: `${PROVIDER_COLORS[step.provider as AIProvider] || 'var(--accent-purple)'}10`,
+                                                            border: `1px solid ${PROVIDER_COLORS[step.provider as AIProvider] || 'var(--accent-purple)'}25`,
                                                             borderRadius: 12,
                                                             padding: '12px 14px',
                                                         }}
@@ -1091,20 +1170,20 @@ function ChatContent() {
                                                             {PROVIDER_ICONS[step.provider || '']} {step.provider} <span style={{ opacity: 0.5, fontWeight: 400 }}>is thinking</span>
                                                         </div>
                                                         <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.8)', lineHeight: 1.6, fontFamily: 'Inter, sans-serif' }}>
-                                                            {step.content}
+                                                            {getTextContent(step.content)}
                                                         </div>
                                                     </div>
                                                 )}
                                                 {step.type === 'delegation' && (
                                                     <div
                                                         style={{
-                                                            background: 'rgba(124,92,252,0.1)',
+                                                            background: 'color-mix(in srgb, var(--accent-purple) 10%, transparent)',
                                                             border: '1px solid rgba(124,92,252,0.3)',
                                                             borderRadius: 12,
                                                             padding: '12px 14px',
                                                         }}
                                                     >
-                                                        <div style={{ fontSize: '0.7rem', color: '#a78bfa', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                                                        <div style={{ fontSize: '0.7rem', color: 'var(--accent-purple)', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                                                             → Delegation
                                                         </div>
                                                         <div style={{ fontSize: '0.82rem', color: 'white', fontWeight: 600, marginBottom: 6 }}>
@@ -1128,7 +1207,7 @@ function ChatContent() {
                                                             {PROVIDER_ICONS[step.provider || '']} {step.provider} <span style={{ opacity: 0.5, fontWeight: 400 }}>responded</span>
                                                         </div>
                                                         <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.8)', lineHeight: 1.6 }}>
-                                                            {step.content}
+                                                            {getTextContent(step.content)}
                                                         </div>
                                                     </div>
                                                 )}
@@ -1173,7 +1252,7 @@ function ChatContent() {
                                             <div
                                                 style={{
                                                     marginTop: 20,
-                                                    background: 'rgba(124,92,252,0.05)',
+                                                    background: 'color-mix(in srgb, var(--accent-purple) 5%, transparent)',
                                                     border: '1px solid rgba(124,92,252,0.2)',
                                                     borderRadius: 12,
                                                     padding: '14px 20px',
@@ -1195,7 +1274,7 @@ function ChatContent() {
                                                         onClick={() => setInput(s.replace(/"/g, ''))}
                                                         style={{
                                                             fontSize: '0.8rem',
-                                                            color: '#a78bfa',
+                                                            color: 'var(--accent-purple)',
                                                             cursor: 'pointer',
                                                             marginBottom: 4,
                                                             padding: '4px 0',
@@ -1212,7 +1291,26 @@ function ChatContent() {
                                         <div key={msg.id} className="fade-in-up">
                                             {msg.role === 'user' ? (
                                                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                                    <div className="bubble-user">{msg.content}</div>
+                                                    <div className="bubble-user">
+                                                        {typeof msg.content === 'string' ? (
+                                                            msg.content
+                                                        ) : (
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                                                {msg.content.map((part, i) => (
+                                                                    <div key={i}>
+                                                                        {part.type === 'text' && part.text}
+                                                                        {part.type === 'image_url' && part.image_url && (
+                                                                            <img
+                                                                                src={part.image_url.url}
+                                                                                alt="Uploaded"
+                                                                                style={{ maxWidth: '100%', borderRadius: 8, marginTop: 4, border: '1px solid rgba(255,255,255,0.1)' }}
+                                                                            />
+                                                                        )}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             ) : (
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1227,7 +1325,7 @@ function ChatContent() {
                                                     >
                                                         <span
                                                             style={{
-                                                                color: PROVIDER_COLORS[msg.provider as AIProvider] || '#7c5cfc',
+                                                                color: PROVIDER_COLORS[msg.provider as AIProvider] || 'var(--accent-purple)',
                                                                 fontSize: '1rem',
                                                             }}
                                                         >
@@ -1237,8 +1335,8 @@ function ChatContent() {
                                                         {msg.role === 'master' && mode === 'ORCHESTRATED' && (
                                                             <span
                                                                 style={{
-                                                                    background: 'rgba(124,92,252,0.15)',
-                                                                    color: '#a78bfa',
+                                                                    background: 'color-mix(in srgb, var(--accent-purple) 15%, transparent)',
+                                                                    color: 'var(--accent-purple)',
                                                                     fontSize: '0.62rem',
                                                                     padding: '1px 6px',
                                                                     borderRadius: 4,
@@ -1255,12 +1353,13 @@ function ChatContent() {
                                                     </div>
                                                     <div className="bubble-master" style={{ lineHeight: 1.7 }}>
                                                         {(() => {
+                                                            const contentStr = getTextContent(msg.content);
                                                             // Split content into text segments and code blocks
                                                             const CODE_SPLIT = /```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g;
                                                             const parts: React.ReactNode[] = [];
                                                             let lastIdx = 0;
                                                             let blockIdx = 0;
-                                                            const src = msg.content;
+                                                            const src = contentStr;
                                                             let m: RegExpExecArray | null;
                                                             CODE_SPLIT.lastIndex = 0;
                                                             while ((m = CODE_SPLIT.exec(src)) !== null) {
@@ -1317,7 +1416,7 @@ function ChatContent() {
                                                                             <div style={{ flex: 1, minWidth: 0 }}>
                                                                                 <div style={{ fontWeight: 600, fontSize: '0.82rem', fontFamily: 'Inter,sans-serif' }}>{fileTitle}</div>
                                                                                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 1 }}>
-                                                                                    <span style={{ background: 'rgba(124,92,252,0.12)', color: '#7c5cfc', borderRadius: 4, padding: '1px 5px', fontWeight: 700, fontSize: '0.65rem' }}>{lang}</span>
+                                                                                    <span style={{ background: 'color-mix(in srgb, var(--accent-purple) 12%, transparent)', color: 'var(--accent-purple)', borderRadius: 4, padding: '1px 5px', fontWeight: 700, fontSize: '0.65rem' }}>{lang}</span>
                                                                                     <span style={{ marginLeft: 8 }}>{lines} lines</span>
                                                                                 </div>
                                                                             </div>
@@ -1425,6 +1524,38 @@ function ChatContent() {
                                     background: 'var(--bg-secondary)',
                                 }}
                             >
+                                {/* Attachment Previews */}
+                                {attachments.length > 0 && (
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                                        {attachments.map((attr, i) => (
+                                            <div
+                                                key={i}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: 8,
+                                                    background: 'color-mix(in srgb, var(--accent-purple) 10%, transparent)',
+                                                    border: '1px solid rgba(124,92,252,0.3)',
+                                                    borderRadius: 10,
+                                                    padding: '6px 10px',
+                                                    fontSize: '0.75rem',
+                                                    color: 'white',
+                                                    animation: 'fade-in-up 0.2s ease',
+                                                }}
+                                            >
+                                                <span>{attr.isImage ? '🖼️' : '📄'}</span>
+                                                <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attr.name}</span>
+                                                <button
+                                                    onClick={() => removeAttachment(i)}
+                                                    style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: '0.8rem' }}
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
                                 <div
                                     style={{
                                         display: 'flex',
@@ -1432,10 +1563,33 @@ function ChatContent() {
                                         background: 'var(--bg-card)',
                                         border: '1px solid var(--border-bright)',
                                         borderRadius: 14,
-                                        padding: '8px 8px 8px 16px',
+                                        padding: '8px 8px 8px 8px',
                                         transition: 'border-color 0.2s ease',
                                     }}
                                 >
+                                    <input type="file" ref={fileInputRef} hidden onChange={handleFileChange} multiple />
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={streaming}
+                                        style={{
+                                            width: 44,
+                                            height: 44,
+                                            borderRadius: 10,
+                                            border: 'none',
+                                            background: 'color-mix(in srgb, var(--accent-purple) 10%, transparent)',
+                                            color: 'var(--accent-purple)',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            fontSize: '1.2rem',
+                                            transition: 'all 0.2s',
+                                            alignSelf: 'flex-end',
+                                        }}
+                                        title="Add attachment"
+                                    >
+                                        📎
+                                    </button>
                                     <textarea
                                         ref={inputRef}
                                         value={input}

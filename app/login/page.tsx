@@ -98,7 +98,7 @@ export default function LoginPage() {
                 </div>
 
                 {/* Card */}
-                <div className="glass-card" style={{ padding: 36 }}>
+                <div className="glass-card" style={{ padding: 36, background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                     {/* Toggle */}
                     <div
                         style={{

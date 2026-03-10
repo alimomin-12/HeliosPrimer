@@ -47,10 +47,10 @@ export const THEMES: ThemeDef[] = [
     },
     {
         id: 'simple',
-        label: 'Simple',
-        icon: '✦',
-        description: 'Minimal off-white, no distraction',
-        swatch: ['#fafafa', '#4a4af0'],
+        label: 'Warm Simple',
+        icon: '☕',
+        description: 'Warm, earth-toned creams with light shadows',
+        swatch: ['#fcf9f2', '#e07a5f'],
     },
 ];
 

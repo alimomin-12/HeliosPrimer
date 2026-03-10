@@ -1,5 +1,5 @@
 import { getAdapter, type AIProvider } from './registry';
-import type { ChatMessage } from './types';
+import type { ChatMessage, ChatContentPart } from './types';
 
 // Master AI is instructed to use this syntax when delegating
 const DELEGATE_REGEX = /\[DELEGATE:\s*([\s\S]*?)\]/g;
@@ -7,6 +7,17 @@ const DELEGATE_REGEX = /\[DELEGATE:\s*([\s\S]*?)\]/g;
 // Strip any [DELEGATE: ...] blocks from text (prevents feedback loop in history)
 function stripDelegateTags(text: string): string {
     return text.replace(DELEGATE_REGEX, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Extracts plain text from a message's content (string or parts).
+ */
+function getTextContent(content: string | ChatContentPart[]): string {
+    if (typeof content === 'string') return content;
+    return content
+        .filter((part) => part.type === 'text')
+        .map((part) => (part as any).text)
+        .join('\n');
 }
 
 export interface OrchestrationStep {
@@ -26,7 +37,7 @@ export interface OrchestrationContext {
         apiKey: string;
         model: string;
     }>;
-    userQuery: string;
+    userQuery: string | ChatContentPart[];
     conversationHistory: ChatMessage[];
     onStep: (step: OrchestrationStep) => void;
     researchMode?: boolean;
@@ -129,7 +140,7 @@ export async function* runOrchestration(
 
     // Sanitize history: strip any [DELEGATE] tags from previous assistant messages
     const cleanHistory: ChatMessage[] = conversationHistory.map((m) =>
-        m.role === 'assistant' ? { ...m, content: stripDelegateTags(m.content) } : m
+        m.role === 'assistant' ? { ...m, content: stripDelegateTags(getTextContent(m.content)) } : m
     );
 
     // Select prompts based on mode
@@ -157,7 +168,7 @@ export async function* runOrchestration(
 
     const delegateItems = matches.length > 0
         ? matches.map((m) => m[1].trim())
-        : [userQuery];
+        : [getTextContent(userQuery)];
 
     for (let i = 0; i < delegateItems.length; i++) {
         const question = delegateItems[i];
@@ -197,9 +208,9 @@ export async function* runOrchestration(
             `[${sourceLabel} ${i + 1}: ${d.provider}]\nResearch Question: ${d.question}\nFindings:\n${d.answer}`
         ).join('\n\n---\n\n') +
         (researchMode
-            ? `\n\n---\n\nUsing the above research materials, produce a comprehensive professional research document addressing the user's original query: "${userQuery}"\n\nEnsure all citations from the research are preserved and properly attributed in your document.`
-            : `\n\n---\n\nUsing the above research, write a comprehensive answer to the user's original question: "${userQuery}"`)
-        : `Answer the user's question: "${userQuery}"`;
+            ? `\n\n---\n\nUsing the above research materials, produce a comprehensive professional research document addressing the user's original query: "${getTextContent(userQuery)}"\n\nEnsure all citations from the research are preserved and properly attributed in your document.`
+            : `\n\n---\n\nUsing the above research, write a comprehensive answer to the user's original question: "${getTextContent(userQuery)}"`)
+        : `Answer the user's question: "${getTextContent(userQuery)}"`;
 
     const synthesisMessages: ChatMessage[] = [
         { role: 'system', content: synthesisPrompt },

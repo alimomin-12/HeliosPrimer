@@ -1,12 +1,12 @@
 import OpenAI from 'openai';
-import type { AIAdapter, ChatMessage } from './types';
+import type { AIAdapter, ChatMessage } from '../types';
 
 export const openAIAdapter: AIAdapter = {
     async chat(messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
         const client = new OpenAI({ apiKey });
         const response = await client.chat.completions.create({
             model,
-            messages,
+            messages: messages as any,
         });
         return response.choices[0]?.message?.content || '';
     },
@@ -15,7 +15,7 @@ export const openAIAdapter: AIAdapter = {
         const client = new OpenAI({ apiKey });
         const stream = await client.chat.completions.create({
             model,
-            messages,
+            messages: messages as any,
             stream: true,
         });
         for await (const chunk of stream) {

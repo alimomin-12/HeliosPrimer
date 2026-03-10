@@ -141,7 +141,7 @@ export default function ConnectPage() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, alignItems: 'start' }}>
                 {/* Add/Update connection form */}
-                <div className="glass-card" style={{ padding: 28 }}>
+                <div className="glass-card" style={{ padding: 28, background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                     <h2 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 20, fontFamily: 'Space Grotesk, sans-serif' }}>
                         Add / Update Connection
                     </h2>
@@ -305,7 +305,7 @@ export default function ConnectPage() {
                             {[1, 2].map((i) => <div key={i} className="shimmer" style={{ height: 110 }} />)}
                         </div>
                     ) : connections.length === 0 ? (
-                        <div className="glass-card" style={{ padding: 32, textAlign: 'center' }}>
+                        <div className="glass-card" style={{ padding: 32, textAlign: 'center', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                             <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>🔌</div>
                             <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                                 No connections yet. Add your first AI above.
@@ -318,7 +318,7 @@ export default function ConnectPage() {
                                 const tr = testResult[conn.provider];
                                 const isTesting = testing === conn.provider;
                                 return (
-                                    <div key={conn.id} className="glass-card" style={{ padding: '18px 20px' }}>
+                                    <div key={conn.id} className="glass-card" style={{ padding: '18px 20px', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
                                         {/* Header row */}
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
                                             <div
