@@ -66,9 +66,9 @@ function ChatContent() {
 
     const [connections, setConnections] = useState<AIConnection[]>([]);
     const [mode, setMode] = useState<'DIRECT' | 'ORCHESTRATED'>(initMode as 'DIRECT' | 'ORCHESTRATED');
-    const [selectedProvider, setSelectedProvider] = useState<string>('');
-    const [masterProvider, setMasterProvider] = useState<string>('');
-    const [slaveProviders, setSlaveProviders] = useState<string[]>([]);
+    const [selectedConnectionId, setSelectedConnectionId] = useState<string>('');
+    const [masterConnectionId, setMasterConnectionId] = useState<string>('');
+    const [slaveConnectionIds, setSlaveConnectionIds] = useState<string[]>([]);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [thinkingSteps, setThinkingSteps] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
@@ -99,6 +99,9 @@ function ChatContent() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const selectedProviderStr = connections.find(c => c.id === selectedConnectionId)?.provider || '';
+    const masterProviderStr = connections.find(c => c.id === masterConnectionId)?.provider || '';
 
     const getTextContent = (content: string | ChatContentPart[]): string => {
         if (typeof content === 'string') return content;
@@ -172,9 +175,9 @@ function ChatContent() {
             const active = data.filter((c: AIConnection) => c.isActive);
             setConnections(active);
             if (active.length > 0) {
-                setSelectedProvider(active[0].provider);
-                setMasterProvider(active[0].provider);
-                if (active.length > 1) setSlaveProviders([active[1].provider]);
+                setSelectedConnectionId(active[0].id);
+                setMasterConnectionId(active[0].id);
+                if (active.length > 1) setSlaveConnectionIds([active[1].id]);
             }
         });
     }, []);
@@ -237,15 +240,25 @@ function ChatContent() {
 
             // If orchestrated, restore providers from config
             if (conv.orchestrationConfig) {
-                setMasterProvider(conv.orchestrationConfig.masterProvider);
-                // slaveProviders is stored as JSON string in DB — must parse it
-                let slaves: string[] = [];
-                try {
-                    slaves = JSON.parse(conv.orchestrationConfig.slaveProviders || '[]');
-                } catch {
-                    slaves = [];
+                // To restore the actual connection, we have to guess based on provider string 
+                // OR ideally we would store Connection IDs in the Orchestration Config in the future.
+                // For now, map the stored string to the first matching connection ID.
+                const resConns = await fetch('/api/connections');
+                if (resConns.ok) {
+                    const activeConns = await resConns.json();
+                    const masterP = conv.orchestrationConfig.masterProvider;
+                    const mConn = activeConns.find((c: any) => c.provider === masterP);
+                    if (mConn) setMasterConnectionId(mConn.id);
+
+                    let slaves: string[] = [];
+                    try {
+                        slaves = JSON.parse(conv.orchestrationConfig.slaveProviders || '[]');
+                    } catch {
+                        slaves = [];
+                    }
+                    const sConns = slaves.map(p => activeConns.find((c: any) => c.provider === p)?.id).filter(Boolean) as string[];
+                    setSlaveConnectionIds(sConns);
                 }
-                setSlaveProviders(slaves);
             }
         } catch (err) {
             console.error('[loadConversation] failed:', err);
@@ -325,7 +338,7 @@ function ChatContent() {
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversationId: convId, provider: selectedProvider, message: userMsg, history }),
+            body: JSON.stringify({ conversationId: convId, connectionId: selectedConnectionId, message: userMsg, history }),
         });
 
         const reader = res.body?.getReader();
@@ -333,9 +346,13 @@ function ChatContent() {
 
         const msgId = Date.now().toString();
         let outputText = '';
+        // Look up the actual provider string from the connections array for the UI
+        const activeConn = connections.find(c => c.id === selectedConnectionId);
+        const providerStr = activeConn ? activeConn.provider : 'Unknown';
+
         setMessages((prev) => [
             ...prev,
-            { id: msgId, role: 'master', content: '', provider: selectedProvider, type: 'final' },
+            { id: msgId, role: 'master', content: '', provider: providerStr, type: 'final' },
         ]);
 
         const decoder = new TextDecoder();
@@ -372,8 +389,8 @@ function ChatContent() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 conversationId: convId,
-                masterProvider,
-                slaveProviders,
+                masterConnectionId,
+                slaveConnectionIds,
                 message: userMsg,
                 history,
                 researchMode,
@@ -424,9 +441,10 @@ function ChatContent() {
                     } else if (step.type === 'final') {
                         if (!finalStarted) {
                             finalStarted = true;
+                            const pStr = connections.find(c => c.id === masterConnectionId)?.provider || 'Unknown';
                             setMessages((prev) => [
                                 ...prev,
-                                { id: finalMsgId, role: 'master', type: 'final', content: step.content, provider: masterProvider },
+                                { id: finalMsgId, role: 'master', type: 'final', content: step.content, provider: pStr },
                             ]);
                         } else {
                             setMessages((prev) =>
@@ -584,236 +602,275 @@ function ChatContent() {
             {showPanel && (
                 <div
                     style={{
-                        width: 280,
+                        width: 264,
                         borderRight: '1px solid var(--border)',
                         display: 'flex',
                         flexDirection: 'column',
                         background: 'var(--bg-secondary)',
                         flexShrink: 0,
+                        overflowY: 'auto',
                     }}
                 >
-                    <div style={{ padding: '20px 16px 12px', borderBottom: '1px solid var(--border)', overflowY: 'auto' }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: 14, fontFamily: 'Space Grotesk, sans-serif' }}>
-                            Chat Configuration
-                        </div>
+                    <div style={{ padding: '16px 14px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
                         {/* Mode toggle */}
-                        <div style={{ display: 'flex', background: 'var(--bg-card)', borderRadius: 8, padding: 3, marginBottom: 16 }}>
-                            {(['DIRECT', 'ORCHESTRATED'] as const).map((m) => (
-                                <button
-                                    key={m}
-                                    onClick={() => {
-                                        setMode(m);
-                                        if (m === 'DIRECT' && researchMode) {
-                                            setResearchMode(false);
-                                            localStorage.setItem('heliosprimer-research-mode', 'false');
-                                        }
-                                    }}
-                                    style={{
-                                        flex: 1,
-                                        padding: '7px 4px',
-                                        borderRadius: 6,
-                                        border: 'none',
-                                        cursor: 'pointer',
-                                        fontWeight: 600,
-                                        fontSize: '0.72rem',
-                                        background: mode === m ? 'linear-gradient(135deg, #7c5cfc, #3b82f6)' : 'transparent',
-                                        color: mode === m ? 'white' : 'var(--text-muted)',
-                                        fontFamily: 'Inter, sans-serif',
-                                        transition: 'all 0.15s ease',
-                                    }}
-                                >
-                                    {m === 'DIRECT' ? '⚡ Direct' : '🧠 Orchestrate'}
-                                </button>
-                            ))}
+                        <div>
+                            <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
+                                Mode
+                            </div>
+                            <div style={{ display: 'flex', background: 'var(--bg-card)', borderRadius: 10, padding: 3, gap: 2, border: '1px solid var(--border)' }}>
+                                {(['DIRECT', 'ORCHESTRATED'] as const).map((m) => (
+                                    <button
+                                        key={m}
+                                        onClick={() => {
+                                            setMode(m);
+                                            if (m === 'DIRECT' && researchMode) {
+                                                setResearchMode(false);
+                                                localStorage.setItem('heliosprimer-research-mode', 'false');
+                                            }
+                                        }}
+                                        style={{
+                                            flex: 1,
+                                            padding: '8px 6px',
+                                            borderRadius: 8,
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            fontWeight: 700,
+                                            fontSize: '0.72rem',
+                                            background: mode === m
+                                                ? m === 'DIRECT'
+                                                    ? 'linear-gradient(135deg, #3b82f6, #7c5cfc)'
+                                                    : 'linear-gradient(135deg, #7c5cfc, #a855f7)'
+                                                : 'transparent',
+                                            color: mode === m ? 'white' : 'var(--text-muted)',
+                                            fontFamily: 'Inter, sans-serif',
+                                            transition: 'all 0.18s ease',
+                                            boxShadow: mode === m ? '0 2px 8px rgba(124,92,252,0.3)' : 'none',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: 5,
+                                        }}
+                                    >
+                                        <span style={{ fontSize: '0.85rem' }}>{m === 'DIRECT' ? '⚡' : '🧠'}</span>
+                                        {m === 'DIRECT' ? 'Direct' : 'Orchestrate'}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
 
                         {/* Direct mode: pick AI */}
                         {mode === 'DIRECT' && (
                             <div>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
                                     AI Provider
                                 </div>
-                                {activeConns.map((conn) => {
-                                    const color = PROVIDER_COLORS[conn.provider as AIProvider] || 'var(--accent-purple)';
-                                    const active = selectedProvider === conn.provider;
-                                    return (
-                                        <button
-                                            key={conn.provider}
-                                            onClick={() => setSelectedProvider(conn.provider)}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px 12px',
-                                                borderRadius: 8,
-                                                border: active ? `1px solid ${color}` : '1px solid var(--border)',
-                                                background: active ? `${color}15` : 'var(--bg-card)',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: 8,
-                                                marginBottom: 6,
-                                                color: active ? color : 'var(--text-secondary)',
-                                                fontFamily: 'Inter, sans-serif',
-                                                transition: 'all 0.15s ease',
-                                            }}
-                                        >
-                                            <span style={{ fontSize: '1.1rem' }}>{PROVIDER_ICONS[conn.provider]}</span>
-                                            <div style={{ textAlign: 'left' }}>
-                                                <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{PROVIDER_LABELS[conn.provider as AIProvider]}</div>
-                                                <div style={{ fontSize: '0.7rem', opacity: 0.7 }}>{conn.model}</div>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                    {activeConns.map((conn) => {
+                                        const color = PROVIDER_COLORS[conn.provider as AIProvider] || 'var(--accent-purple)';
+                                        const active = selectedConnectionId === conn.id;
+                                        return (
+                                            <button
+                                                key={conn.id}
+                                                onClick={() => setSelectedConnectionId(conn.id)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '9px 11px',
+                                                    borderRadius: 10,
+                                                    border: active ? `1.5px solid ${color}` : '1px solid var(--border)',
+                                                    background: active ? `${color}12` : 'var(--bg-card)',
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: 9,
+                                                    color: active ? color : 'var(--text-secondary)',
+                                                    fontFamily: 'Inter, sans-serif',
+                                                    transition: 'all 0.15s ease',
+                                                    boxShadow: active ? `0 0 0 3px ${color}18` : 'none',
+                                                }}
+                                            >
+                                                <div style={{
+                                                    width: 30, height: 30, borderRadius: 8,
+                                                    background: `${color}18`, display: 'flex',
+                                                    alignItems: 'center', justifyContent: 'center',
+                                                    fontSize: '1rem', flexShrink: 0,
+                                                }}>
+                                                    {PROVIDER_ICONS[conn.provider]}
+                                                </div>
+                                                <div style={{ textAlign: 'left', flex: 1, minWidth: 0 }}>
+                                                    <div style={{ fontWeight: 700, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                                        {PROVIDER_LABELS[conn.provider as AIProvider]}
+                                                        {conn.label && <span style={{ fontSize: '0.6rem', fontWeight: 600, color, opacity: 0.8, textTransform: 'uppercase' }}>· {conn.label}</span>}
+                                                    </div>
+                                                    <div style={{ fontSize: '0.65rem', opacity: 0.55, fontFamily: 'monospace', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conn.model}</div>
+                                                </div>
+                                                {active && (
+                                                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0, boxShadow: `0 0 6px ${color}` }} />
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         )}
 
                         {/* Orchestrated mode */}
                         {mode === 'ORCHESTRATED' && (
-                            <div>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                    Master AI (leads)
-                                </div>
-                                {activeConns.map((conn) => {
-                                    const color = PROVIDER_COLORS[conn.provider as AIProvider] || 'var(--accent-purple)';
-                                    const active = masterProvider === conn.provider;
-                                    return (
-                                        <button
-                                            key={conn.provider}
-                                            onClick={() => setMasterProvider(conn.provider)}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px 12px',
-                                                borderRadius: 8,
-                                                border: active ? `2px solid ${color}` : '1px solid var(--border)',
-                                                background: active ? `${color}15` : 'var(--bg-card)',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: 8,
-                                                marginBottom: 6,
-                                                color: active ? color : 'var(--text-secondary)',
-                                                fontFamily: 'Inter, sans-serif',
-                                                transition: 'all 0.15s ease',
-                                                position: 'relative',
-                                            }}
-                                        >
-                                            {active && (
-                                                <span
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                                {/* Master AI */}
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                                        <span style={{ fontSize: '0.72rem' }}>👑</span>
+                                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                                            Master AI
+                                        </div>
+                                        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                        {activeConns.map((conn) => {
+                                            const color = PROVIDER_COLORS[conn.provider as AIProvider] || 'var(--accent-purple)';
+                                            const active = masterConnectionId === conn.id;
+                                            return (
+                                                <button
+                                                    key={conn.id}
+                                                    onClick={() => setMasterConnectionId(conn.id)}
                                                     style={{
-                                                        position: 'absolute',
-                                                        top: -6,
-                                                        right: 8,
-                                                        background: color,
-                                                        color: 'white',
-                                                        fontSize: '0.55rem',
-                                                        padding: '1px 6px',
-                                                        borderRadius: 6,
-                                                        fontWeight: 700,
+                                                        width: '100%',
+                                                        padding: '9px 11px',
+                                                        borderRadius: 10,
+                                                        border: active ? `1.5px solid ${color}` : '1px solid var(--border)',
+                                                        background: active ? `${color}12` : 'var(--bg-card)',
+                                                        cursor: 'pointer',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: 9,
+                                                        color: active ? color : 'var(--text-secondary)',
+                                                        fontFamily: 'Inter, sans-serif',
+                                                        transition: 'all 0.15s ease',
+                                                        boxShadow: active ? `0 0 0 3px ${color}18` : 'none',
                                                     }}
                                                 >
-                                                    MASTER
-                                                </span>
-                                            )}
-                                            <span style={{ fontSize: '1.1rem' }}>{PROVIDER_ICONS[conn.provider]}</span>
-                                            <div style={{ textAlign: 'left' }}>
-                                                <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{PROVIDER_LABELS[conn.provider as AIProvider]}</div>
-                                                <div style={{ fontSize: '0.7rem', opacity: 0.7 }}>{conn.model}</div>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-
-                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 14, marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                    Slave AIs (assist)
+                                                    <div style={{
+                                                        width: 30, height: 30, borderRadius: 8,
+                                                        background: `${color}18`, display: 'flex',
+                                                        alignItems: 'center', justifyContent: 'center',
+                                                        fontSize: '1rem', flexShrink: 0,
+                                                    }}>
+                                                        {PROVIDER_ICONS[conn.provider]}
+                                                    </div>
+                                                    <div style={{ textAlign: 'left', flex: 1, minWidth: 0 }}>
+                                                        <div style={{ fontWeight: 700, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                                            {PROVIDER_LABELS[conn.provider as AIProvider]}
+                                                            {conn.label && <span style={{ fontSize: '0.6rem', fontWeight: 600, color, opacity: 0.8, textTransform: 'uppercase' }}>· {conn.label}</span>}
+                                                        </div>
+                                                        <div style={{ fontSize: '0.65rem', opacity: 0.55, fontFamily: 'monospace', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conn.model}</div>
+                                                    </div>
+                                                    {active && (
+                                                        <div style={{ flexShrink: 0, fontSize: '0.65rem', fontWeight: 800, background: color, color: 'white', borderRadius: 6, padding: '2px 6px' }}>LEAD</div>
+                                                    )}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
-                                {activeConns
-                                    .filter((c) => c.provider !== masterProvider)
-                                    .map((conn) => {
-                                        const color = PROVIDER_COLORS[conn.provider as AIProvider] || '#10b981';
-                                        const active = slaveProviders.includes(conn.provider);
-                                        return (
-                                            <button
-                                                key={conn.provider}
-                                                onClick={() =>
-                                                    setSlaveProviders((prev) =>
-                                                        prev.includes(conn.provider)
-                                                            ? prev.filter((p) => p !== conn.provider)
-                                                            : [...prev, conn.provider]
-                                                    )
-                                                }
-                                                style={{
-                                                    width: '100%',
-                                                    padding: '10px 12px',
-                                                    borderRadius: 8,
-                                                    border: active ? `2px solid ${color}` : '1px solid var(--border)',
-                                                    background: active ? `${color}15` : 'var(--bg-card)',
-                                                    cursor: 'pointer',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: 8,
-                                                    marginBottom: 6,
-                                                    color: active ? color : 'var(--text-secondary)',
-                                                    fontFamily: 'Inter, sans-serif',
-                                                    transition: 'all 0.15s ease',
-                                                    position: 'relative',
-                                                }}
-                                            >
-                                                {active && (
-                                                    <span
+
+                                {/* Slave AIs */}
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                                        <span style={{ fontSize: '0.72rem' }}>🤝</span>
+                                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                                            Specialists
+                                        </div>
+                                        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                                        {slaveConnectionIds.length > 0 && (
+                                            <span style={{ fontSize: '0.6rem', fontWeight: 700, background: 'rgba(124,92,252,0.15)', color: 'var(--accent-purple)', borderRadius: 8, padding: '2px 6px' }}>
+                                                {slaveConnectionIds.length} selected
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                        {activeConns
+                                            .filter((c) => c.id !== masterConnectionId)
+                                            .map((conn) => {
+                                                const color = PROVIDER_COLORS[conn.provider as AIProvider] || '#10b981';
+                                                const active = slaveConnectionIds.includes(conn.id);
+                                                return (
+                                                    <button
+                                                        key={conn.id}
+                                                        onClick={() =>
+                                                            setSlaveConnectionIds((prev) =>
+                                                                prev.includes(conn.id)
+                                                                    ? prev.filter((p) => p !== conn.id)
+                                                                    : [...prev, conn.id]
+                                                            )
+                                                        }
                                                         style={{
-                                                            position: 'absolute',
-                                                            top: -6,
-                                                            right: 8,
-                                                            background: color,
-                                                            color: 'white',
-                                                            fontSize: '0.55rem',
-                                                            padding: '1px 6px',
-                                                            borderRadius: 6,
-                                                            fontWeight: 700,
+                                                            width: '100%',
+                                                            padding: '9px 11px',
+                                                            borderRadius: 10,
+                                                            border: active ? `1.5px solid ${color}` : '1px solid var(--border)',
+                                                            background: active ? `${color}12` : 'var(--bg-card)',
+                                                            cursor: 'pointer',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: 9,
+                                                            color: active ? color : 'var(--text-secondary)',
+                                                            fontFamily: 'Inter, sans-serif',
+                                                            transition: 'all 0.15s ease',
+                                                            boxShadow: active ? `0 0 0 3px ${color}18` : 'none',
                                                         }}
                                                     >
-                                                        SLAVE ✓
-                                                    </span>
-                                                )}
-                                                <span style={{ fontSize: '1.1rem' }}>{PROVIDER_ICONS[conn.provider]}</span>
-                                                <div style={{ textAlign: 'left' }}>
-                                                    <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{PROVIDER_LABELS[conn.provider as AIProvider]}</div>
-                                                    <div style={{ fontSize: '0.7rem', opacity: 0.7 }}>{conn.model}</div>
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
-
-                                {activeConns.length < 2 && (
-                                    <div
-                                        style={{
-                                            background: 'rgba(245,158,11,0.1)',
-                                            border: '1px solid rgba(245,158,11,0.3)',
-                                            borderRadius: 8,
-                                            padding: '10px 12px',
-                                            color: '#f59e0b',
-                                            fontSize: '0.78rem',
-                                            marginTop: 8,
-                                            lineHeight: 1.5,
-                                        }}
-                                    >
-                                        ⚠️ You need at least 2 connected AIs for orchestration mode.
+                                                        {/* Checkbox */}
+                                                        <div style={{
+                                                            width: 16, height: 16, borderRadius: 5, flexShrink: 0,
+                                                            border: active ? `2px solid ${color}` : '1.5px solid var(--border)',
+                                                            background: active ? color : 'transparent',
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            fontSize: '0.6rem', color: 'white', transition: 'all 0.15s',
+                                                        }}>
+                                                            {active && '✓'}
+                                                        </div>
+                                                        <div style={{
+                                                            width: 28, height: 28, borderRadius: 7,
+                                                            background: `${color}18`, display: 'flex',
+                                                            alignItems: 'center', justifyContent: 'center',
+                                                            fontSize: '0.95rem', flexShrink: 0,
+                                                        }}>
+                                                            {PROVIDER_ICONS[conn.provider]}
+                                                        </div>
+                                                        <div style={{ textAlign: 'left', flex: 1, minWidth: 0 }}>
+                                                            <div style={{ fontWeight: 700, fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                                                {PROVIDER_LABELS[conn.provider as AIProvider]}
+                                                                {conn.label && <span style={{ fontSize: '0.6rem', fontWeight: 600, color, opacity: 0.8, textTransform: 'uppercase' }}>· {conn.label}</span>}
+                                                            </div>
+                                                            <div style={{ fontSize: '0.65rem', opacity: 0.55, fontFamily: 'monospace', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conn.model}</div>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
                                     </div>
-                                )}
+
+                                    {activeConns.length < 2 && (
+                                        <div style={{
+                                            display: 'flex', alignItems: 'center', gap: 8,
+                                            background: 'rgba(245,158,11,0.07)',
+                                            border: '1px solid rgba(245,158,11,0.25)',
+                                            borderRadius: 8, padding: '8px 10px', marginTop: 8,
+                                            color: '#f59e0b', fontSize: '0.72rem', lineHeight: 1.4,
+                                        }}>
+                                            <span>⚠️</span>
+                                            <span>Need at least 2 AI connections for orchestration.</span>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
 
                         {/* Research Mode Toggle */}
                         <div style={{
-                            marginTop: 16,
                             borderRadius: 10,
-                            border: researchMode
-                                ? '1.5px solid rgba(16,185,129,0.5)'
-                                : '1px solid var(--border)',
-                            background: researchMode
-                                ? 'rgba(16,185,129,0.07)'
-                                : 'var(--bg-card)',
+                            border: researchMode ? '1.5px solid rgba(16,185,129,0.45)' : '1px solid var(--border)',
+                            background: researchMode ? 'rgba(16,185,129,0.06)' : 'var(--bg-card)',
                             overflow: 'hidden',
                             transition: 'all 0.2s ease',
                         }}>
@@ -829,7 +886,7 @@ function ChatContent() {
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: 10,
-                                    padding: '12px 14px',
+                                    padding: '10px 12px',
                                     background: 'transparent',
                                     border: 'none',
                                     cursor: 'pointer',
@@ -838,54 +895,43 @@ function ChatContent() {
                             >
                                 {/* Toggle pill */}
                                 <div style={{
-                                    width: 38, height: 20, borderRadius: 10, flexShrink: 0,
+                                    width: 34, height: 18, borderRadius: 9, flexShrink: 0,
                                     background: researchMode ? '#10b981' : 'var(--border-bright)',
-                                    position: 'relative',
-                                    transition: 'background 0.2s',
+                                    position: 'relative', transition: 'background 0.2s',
                                 }}>
                                     <div style={{
-                                        position: 'absolute',
-                                        top: 3, left: researchMode ? 20 : 3,
+                                        position: 'absolute', top: 2,
+                                        left: researchMode ? 18 : 2,
                                         width: 14, height: 14, borderRadius: '50%',
-                                        background: 'white',
-                                        transition: 'left 0.2s',
+                                        background: 'white', transition: 'left 0.2s',
                                         boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
                                     }} />
                                 </div>
                                 <div style={{ flex: 1 }}>
                                     <div style={{
-                                        fontSize: '0.84rem',
-                                        fontWeight: 700,
+                                        fontSize: '0.8rem', fontWeight: 700,
                                         color: researchMode ? '#10b981' : 'var(--text-primary)',
                                         fontFamily: 'Space Grotesk, sans-serif',
                                         display: 'flex', alignItems: 'center', gap: 6,
                                     }}>
                                         🔬 Research Mode
                                         {researchMode && (
-                                            <span style={{
-                                                fontSize: '0.6rem', background: '#10b981',
-                                                color: 'white', borderRadius: 4, padding: '1px 6px', fontWeight: 700,
-                                            }}>ACTIVE</span>
+                                            <span style={{ fontSize: '0.58rem', background: '#10b981', color: 'white', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>ACTIVE</span>
                                         )}
                                     </div>
-                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.4 }}>
-                                        {researchMode
-                                            ? 'Multi-agent research with citations & structured document output'
-                                            : 'Enable for fact-based, cited research reports'}
+                                    <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', marginTop: 1, lineHeight: 1.4 }}>
+                                        {researchMode ? 'Multi-agent research with citations' : 'Enable for cited research reports'}
                                     </div>
                                 </div>
                             </button>
                             {researchMode && (
-                                <div style={{
-                                    padding: '0 14px 12px',
-                                    display: 'flex', flexDirection: 'column', gap: 4,
-                                }}>
+                                <div style={{ padding: '0 12px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
                                     {[
                                         '📋 Master AI creates a research plan',
                                         '🔍 Specialist agents gather cited facts',
-                                        '📄 Synthesised into a professional document',
+                                        '📄 Synthesised into a structured doc',
                                     ].map((item) => (
-                                        <div key={item} style={{ fontSize: '0.72rem', color: '#10b981', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                                        <div key={item} style={{ fontSize: '0.68rem', color: '#10b981', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                                             {item}
                                         </div>
                                     ))}
@@ -893,46 +939,38 @@ function ChatContent() {
                             )}
                         </div>
 
-                        {/* Token Stats Panel */}
+                        {/* Token Stats */}
                         {messages.length > 0 && (
-                            <div
-                                style={{
-                                    marginTop: 20,
-                                    paddingTop: 16,
-                                    borderTop: '1px solid var(--border)',
-                                }}
-                            >
-                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                                    📊 Context Stats
+                            <div style={{
+                                borderTop: '1px solid var(--border)',
+                                paddingTop: 12,
+                            }}>
+                                <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                    📊 Session Stats
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
                                     {[
-                                        { label: 'Total Tokens', value: tokenStats.totalTokens.toLocaleString(), color: 'var(--accent-purple)' },
-                                        { label: 'Context Msgs', value: tokenStats.contextMessages.toString(), color: '#3b82f6' },
-                                        { label: 'Input Tokens', value: tokenStats.inputTokens.toLocaleString(), color: '#10b981' },
-                                        { label: 'Output Tokens', value: tokenStats.outputTokens.toLocaleString(), color: '#f59e0b' },
+                                        { label: 'Tokens', value: tokenStats.totalTokens.toLocaleString(), color: 'var(--accent-purple)' },
+                                        { label: 'Messages', value: tokenStats.contextMessages.toString(), color: '#3b82f6' },
+                                        { label: 'In', value: tokenStats.inputTokens.toLocaleString(), color: '#10b981' },
+                                        { label: 'Out', value: tokenStats.outputTokens.toLocaleString(), color: '#f59e0b' },
                                     ].map(({ label, value, color }) => (
                                         <div
                                             key={label}
                                             style={{
-                                                background: `${color}0d`,
+                                                background: `${color}0c`,
                                                 border: `1px solid ${color}20`,
-                                                borderRadius: 8,
-                                                padding: '8px 10px',
+                                                borderRadius: 8, padding: '7px 10px',
                                             }}
                                         >
-                                            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
-                                            <div style={{ fontSize: '0.88rem', fontWeight: 700, color, fontFamily: 'Space Grotesk, sans-serif' }}>{value}</div>
+                                            <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
+                                            <div style={{ fontSize: '0.85rem', fontWeight: 700, color, fontFamily: 'Space Grotesk, sans-serif' }}>{value}</div>
                                         </div>
                                     ))}
-                                </div>
-                                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.4 }}>
-                                    * Estimated (~4 chars/token). Actual usage may vary by provider.
                                 </div>
                             </div>
                         )}
                     </div>
-
                 </div>
             )}
 
@@ -969,13 +1007,13 @@ function ChatContent() {
                             <span style={{ color: 'var(--text-muted)' }}>⏳ Loading conversation...</span>
                         ) : mode === 'DIRECT' ? (
                             <span>
-                                {PROVIDER_ICONS[selectedProvider]} Direct Chat with{' '}
-                                {PROVIDER_LABELS[selectedProvider as AIProvider] || selectedProvider}
+                                {PROVIDER_ICONS[selectedProviderStr]} Direct Chat with{' '}
+                                {PROVIDER_LABELS[selectedProviderStr as AIProvider] || selectedProviderStr}
                             </span>
                         ) : (
                             <span>
-                                🧠 Orchestrated: {PROVIDER_ICONS[masterProvider]}{' '}
-                                {PROVIDER_LABELS[masterProvider as AIProvider] || masterProvider}
+                                🧠 Orchestrated: {PROVIDER_ICONS[masterProviderStr]}{' '}
+                                {PROVIDER_LABELS[masterProviderStr as AIProvider] || masterProviderStr}
                             </span>
                         )}
 
@@ -1245,8 +1283,8 @@ function ChatContent() {
                                         </h2>
                                         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: 400, margin: '0 auto', lineHeight: 1.6 }}>
                                             {mode === 'DIRECT'
-                                                ? `Chatting directly with ${PROVIDER_LABELS[selectedProvider as AIProvider] || selectedProvider}. Type a message to begin.`
-                                                : `${PROVIDER_LABELS[masterProvider as AIProvider] || masterProvider} will lead as Master. Slave AIs will assist with sub-tasks. Ask anything complex!`}
+                                                ? `Chatting directly with ${PROVIDER_LABELS[selectedProviderStr as AIProvider] || selectedProviderStr}. Type a message to begin.`
+                                                : `${PROVIDER_LABELS[masterProviderStr as AIProvider] || masterProviderStr} will lead as Master. Slave AIs will assist with sub-tasks. Ask anything complex!`}
                                         </p>
                                         {mode === 'ORCHESTRATED' && (
                                             <div
@@ -1367,12 +1405,36 @@ function ChatContent() {
                                                                 if (m.index > lastIdx) {
                                                                     const textSeg = src.slice(lastIdx, m.index);
                                                                     parts.push(
-                                                                        <div key={`txt-${blockIdx}`}>
-                                                                            {outputLayout === 'structured'
-                                                                                ? renderMarkdownText(textSeg)
-                                                                                : <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{textSeg}</span>
+                                                                    <div key={`txt-${blockIdx}`}>
+                                                                        {(() => {
+                                                                            const textBody = textSeg;
+                                                                            const thinkStart = textBody.indexOf('<think>');
+                                                                            if (thinkStart !== -1) {
+                                                                                const thinkEnd = textBody.indexOf('</think>');
+                                                                                const isClosed = thinkEnd !== -1;
+                                                                                
+                                                                                const beforeThink = textBody.slice(0, thinkStart);
+                                                                                const thinkContent = isClosed ? textBody.slice(thinkStart + 7, thinkEnd).trim() : textBody.slice(thinkStart + 7).trim();
+                                                                                const afterThink = isClosed ? textBody.slice(thinkEnd + 8).trim() : '';
+
+                                                                                return (
+                                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                                                                        {beforeThink && <div>{outputLayout === 'structured' ? renderMarkdownText(beforeThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{beforeThink}</span>}</div>}
+                                                                                        <details open={!isClosed} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: afterThink ? 8 : 0 }}>
+                                                                                            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none' }}>
+                                                                                                <span>🧠</span> Thinking Process {!isClosed && <span className="pulse-dot" style={{ background: 'var(--text-muted)', width: 6, height: 6, marginLeft: 4 }} />}
+                                                                                            </summary>
+                                                                                            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'Inter,sans-serif', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                                                                                                {thinkContent || 'Thinking...'}
+                                                                                            </div>
+                                                                                        </details>
+                                                                                        {afterThink && <div>{outputLayout === 'structured' ? renderMarkdownText(afterThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{afterThink}</span>}</div>}
+                                                                                    </div>
+                                                                                );
                                                                             }
-                                                                        </div>
+                                                                            return outputLayout === 'structured' ? renderMarkdownText(textSeg) : <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{textSeg}</span>;
+                                                                        })()}
+                                                                    </div>
                                                                     );
                                                                 }
                                                                 const lang = (m[1] || 'plaintext').trim().toLowerCase() || 'plaintext';
@@ -1464,17 +1526,66 @@ function ChatContent() {
                                                                 const tailSeg = src.slice(lastIdx);
                                                                 parts.push(
                                                                     <div key="txt-tail">
-                                                                        {outputLayout === 'structured'
-                                                                            ? renderMarkdownText(tailSeg)
-                                                                            : <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{tailSeg}</span>
-                                                                        }
+                                                                        {(() => {
+                                                                            const textBody = tailSeg;
+                                                                            const thinkStart = textBody.indexOf('<think>');
+                                                                            if (thinkStart !== -1) {
+                                                                                const thinkEnd = textBody.indexOf('</think>');
+                                                                                const isClosed = thinkEnd !== -1;
+                                                                                
+                                                                                const beforeThink = textBody.slice(0, thinkStart);
+                                                                                const thinkContent = isClosed ? textBody.slice(thinkStart + 7, thinkEnd).trim() : textBody.slice(thinkStart + 7).trim();
+                                                                                const afterThink = isClosed ? textBody.slice(thinkEnd + 8).trim() : '';
+
+                                                                                return (
+                                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                                                                        {beforeThink && <div>{outputLayout === 'structured' ? renderMarkdownText(beforeThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{beforeThink}</span>}</div>}
+                                                                                        <details open={!isClosed} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: afterThink ? 8 : 0 }}>
+                                                                                            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none' }}>
+                                                                                                <span>🧠</span> Thinking Process {!isClosed && <span className="pulse-dot" style={{ background: 'var(--text-muted)', width: 6, height: 6, marginLeft: 4 }} />}
+                                                                                            </summary>
+                                                                                            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'Inter,sans-serif', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                                                                                                {thinkContent || 'Thinking...'}
+                                                                                            </div>
+                                                                                        </details>
+                                                                                        {afterThink && <div>{outputLayout === 'structured' ? renderMarkdownText(afterThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{afterThink}</span>}</div>}
+                                                                                    </div>
+                                                                                );
+                                                                            }
+                                                                            return outputLayout === 'structured' ? renderMarkdownText(tailSeg) : <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{tailSeg}</span>;
+                                                                        })()}
                                                                     </div>
                                                                 );
                                                             }
                                                             return parts.length > 0 ? parts : (
-                                                                outputLayout === 'structured'
-                                                                    ? renderMarkdownText(src)
-                                                                    : <span style={{ whiteSpace: 'pre-wrap' }}>{src}</span>
+                                                                (() => {
+                                                                    const textBody = src;
+                                                                    const thinkStart = textBody.indexOf('<think>');
+                                                                    if (thinkStart !== -1) {
+                                                                        const thinkEnd = textBody.indexOf('</think>');
+                                                                        const isClosed = thinkEnd !== -1;
+                                                                        
+                                                                        const beforeThink = textBody.slice(0, thinkStart);
+                                                                        const thinkContent = isClosed ? textBody.slice(thinkStart + 7, thinkEnd).trim() : textBody.slice(thinkStart + 7).trim();
+                                                                        const afterThink = isClosed ? textBody.slice(thinkEnd + 8).trim() : '';
+
+                                                                        return (
+                                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                                                                {beforeThink && <div>{outputLayout === 'structured' ? renderMarkdownText(beforeThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{beforeThink}</span>}</div>}
+                                                                                <details open={!isClosed} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: afterThink ? 8 : 0 }}>
+                                                                                    <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none' }}>
+                                                                                        <span>🧠</span> Thinking Process {!isClosed && <span className="pulse-dot" style={{ background: 'var(--text-muted)', width: 6, height: 6, marginLeft: 4 }} />}
+                                                                                    </summary>
+                                                                                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'Inter,sans-serif', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                                                                                        {thinkContent || 'Thinking...'}
+                                                                                    </div>
+                                                                                </details>
+                                                                                {afterThink && <div>{outputLayout === 'structured' ? renderMarkdownText(afterThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{afterThink}</span>}</div>}
+                                                                            </div>
+                                                                        );
+                                                                    }
+                                                                    return outputLayout === 'structured' ? renderMarkdownText(src) : <span style={{ whiteSpace: 'pre-wrap' }}>{src}</span>;
+                                                                })()
                                                             );
                                                         })()}
                                                         {streaming && msg.id === messages[messages.length - 1]?.id && (
@@ -1597,7 +1708,7 @@ function ChatContent() {
                                         onKeyDown={handleKeyDown}
                                         placeholder={
                                             mode === 'DIRECT'
-                                                ? `Message ${PROVIDER_LABELS[selectedProvider as AIProvider] || selectedProvider}...`
+                                                ? `Message ${PROVIDER_LABELS[selectedProviderStr as AIProvider] || selectedProviderStr}...`
                                                 : 'Ask something complex — your AIs will collaborate to answer...'
                                         }
                                         style={{

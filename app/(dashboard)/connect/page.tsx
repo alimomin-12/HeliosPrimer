@@ -39,14 +39,18 @@ export default function ConnectPage() {
     const [apiKey, setApiKey] = useState('');
     const [model, setModel] = useState(PROVIDER_DEFAULT_MODEL['OPENAI']);
     const [label, setLabel] = useState('');
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [testing, setTesting] = useState<string | null>(null);
     const [testResult, setTestResult] = useState<Record<string, TestState>>({});
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [loading, setLoading] = useState(true);
+    const [devKeys, setDevKeys] = useState<Record<string, string>>({});
+    const [showApiKey, setShowApiKey] = useState(false);
 
     useEffect(() => {
         fetchConnections();
+        fetchDevKeys();
     }, []);
 
     async function fetchConnections() {
@@ -55,19 +59,53 @@ export default function ConnectPage() {
         setLoading(false);
     }
 
+    async function fetchDevKeys() {
+        try {
+            const res = await fetch('/api/dev/keys');
+            if (res.ok) setDevKeys(await res.json());
+        } catch (err) {
+            console.error('Failed to fetch dev keys:', err);
+        }
+    }
+
     function handleProviderChange(p: AIProvider) {
         setSelectedProvider(p);
         setModel(PROVIDER_DEFAULT_MODEL[p]);
         setMessage(null);
     }
 
-    // Pre-fill the form to update an existing connection
-    function handleEdit(conn: AIConnection) {
+    async function handleEdit(conn: AIConnection) {
+        setEditingId(conn.id);
         setSelectedProvider(conn.provider as AIProvider);
         setModel(conn.model);
         setLabel(conn.label || '');
+        setApiKey('');
         setMessage(null);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Fetch the decrypted key so the user can see/edit it
+        try {
+            const res = await fetch(`/api/connections?id=${conn.id}`);
+            if (res.ok) {
+                const data = await res.json();
+                setApiKey(data.apiKey ?? '');
+            }
+        } catch (err) {
+            console.error('Failed to fetch connection key:', err);
+        }
+    }
+
+    function resetForm() {
+        setEditingId(null);
+        setApiKey('');
+        setLabel('');
+        setShowApiKey(false);
+        setModel(PROVIDER_DEFAULT_MODEL[selectedProvider]);
+    }
+
+    function fillDevKey() {
+        if (devKeys[selectedProvider]) {
+            setApiKey(devKeys[selectedProvider]);
+            setMessage({ type: 'success', text: '🧪 Dev key applied!' });
+        }
     }
 
     async function handleSave(e: React.FormEvent) {
@@ -75,420 +113,482 @@ export default function ConnectPage() {
         setSaving(true);
         setMessage(null);
 
+        const payload: any = { provider: selectedProvider, apiKey, model, label };
+        if (editingId) payload.id = editingId;
+
         const res = await fetch('/api/connections', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider: selectedProvider, apiKey, model, label }),
+            body: JSON.stringify(payload),
         });
 
         if (res.ok) {
-            setMessage({ type: 'success', text: '✅ Connection saved! Testing it now...' });
-            setApiKey('');
-            setLabel('');
+            const savedConn = await res.json();
+            setMessage({ type: 'success', text: `✅ Saved! Testing...` });
+            resetForm();
             await fetchConnections();
-            // Auto-test after saving
-            setTimeout(() => handleTest(selectedProvider), 500);
+            setTimeout(() => handleTest(savedConn.id), 500);
         } else {
-            setMessage({ type: 'error', text: '❌ Failed to save connection.' });
+            setMessage({ type: 'error', text: '❌ Failed to save.' });
         }
         setSaving(false);
     }
 
-    async function handleTest(provider: string) {
-        setTesting(provider);
-        setTestResult((prev) => ({ ...prev, [provider]: { valid: null } }));
+    async function handleTest(connectionId: string) {
+        setTesting(connectionId);
+        setTestResult((prev) => ({ ...prev, [connectionId]: { valid: null } }));
         const res = await fetch('/api/connections/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider }),
+            body: JSON.stringify({ connectionId }),
         });
         const data = await res.json();
         setTestResult((prev) => ({
             ...prev,
-            [provider]: { valid: data.valid, error: data.error, model: data.model },
+            [connectionId]: { valid: data.valid, error: data.error, model: data.model },
         }));
         setTesting(null);
     }
 
-    async function handleDelete(id: string, provider: string) {
+    async function handleDelete(id: string) {
         await fetch(`/api/connections?id=${id}`, { method: 'DELETE' });
-        setTestResult((prev) => {
-            const next = { ...prev };
-            delete next[provider];
-            return next;
-        });
+        if (editingId === id) resetForm();
         fetchConnections();
     }
 
     return (
-        <div style={{ padding: '36px 40px', maxWidth: 900 }}>
-            <div style={{ marginBottom: 36 }}>
+        <div style={{ padding: '24px 30px', maxWidth: 1100, margin: '0 auto' }}>
+            <div style={{ marginBottom: 32, textAlign: 'center' }}>
                 <h1
                     style={{
                         fontFamily: 'Space Grotesk, sans-serif',
                         fontSize: '1.8rem',
                         fontWeight: 700,
                         letterSpacing: '-0.02em',
-                        marginBottom: 6,
+                        marginBottom: 4,
                     }}
                 >
-                    Connect <span className="gradient-text">Your AIs</span>
+                    Connect <span className="gradient-text">AI Bricks</span>
                 </h1>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-                    Add your AI provider API keys to start orchestrating
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                    Assemble your swarm of intelligent models
                 </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, alignItems: 'start' }}>
-                {/* Add/Update connection form */}
-                <div className="glass-card" style={{ padding: 28, background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-                    <h2 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 20, fontFamily: 'Space Grotesk, sans-serif' }}>
-                        Add / Update Connection
-                    </h2>
-
-                    {/* Provider selector */}
-                    <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-                        {PROVIDERS.map((p) => {
-                            const color = PROVIDER_COLORS[p];
-                            const active = selectedProvider === p;
-                            return (
+            <div style={{ display: 'grid', gridTemplateColumns: connections.length > 0 ? '400px 1fr' : '1fr', gap: 32, alignItems: 'start' }}>
+                {/* Form Sidebar / Centered */}
+                <div style={{ maxWidth: connections.length > 0 ? 'none' : 500, margin: connections.length > 0 ? '0' : '0 auto', width: '100%' }}>
+                    <div className="glass-card" style={{ padding: 24, border: '1px solid var(--border)', background: 'var(--bg-card)', position: 'sticky', top: 24 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                            <h2 style={{ fontWeight: 700, fontSize: '0.95rem', fontFamily: 'Space Grotesk, sans-serif' }}>
+                                {editingId ? '⚡ Update Connection' : '🧩 New Connection'}
+                            </h2>
+                            {editingId && (
                                 <button
-                                    key={p}
-                                    onClick={() => handleProviderChange(p)}
+                                    onClick={resetForm}
                                     style={{
-                                        flex: 1,
-                                        padding: '14px',
-                                        borderRadius: 12,
-                                        border: active ? `2px solid ${color}` : '2px solid var(--border)',
-                                        background: active ? `${color}15` : 'var(--bg-secondary)',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.2s ease',
-                                        textAlign: 'center',
+                                        fontSize: '0.7rem',
+                                        background: 'rgba(255,255,255,0.05)',
+                                        border: '1px solid var(--border)',
+                                        borderRadius: 6,
+                                        padding: '4px 8px',
+                                        color: 'var(--text-muted)',
+                                        cursor: 'pointer'
                                     }}
                                 >
-                                    <div style={{ fontSize: '1.6rem', color: active ? color : 'var(--text-muted)', marginBottom: 6 }}>
-                                        {PROVIDER_ICONS[p]}
-                                    </div>
-                                    <div style={{ fontWeight: 600, fontSize: '0.82rem', color: active ? color : 'var(--text-secondary)', fontFamily: 'Inter, sans-serif' }}>
-                                        {PROVIDER_LABELS[p]}
-                                    </div>
+                                    Cancel
                                 </button>
-                            );
-                        })}
-                    </div>
-
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.79rem', marginBottom: 18, lineHeight: 1.5 }}>
-                        {PROVIDER_DESCRIPTIONS[selectedProvider]}
-                    </p>
-
-                    <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                        <div>
-                            <label style={{ display: 'block', marginBottom: 6, fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                                API Key *
-                            </label>
-                            <input
-                                className="input-field"
-                                type="password"
-                                placeholder={selectedProvider === 'GEMINI' ? 'AIza...' : selectedProvider === 'QWEN' ? 'sk-... (DashScope)' : 'sk-...'}
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                required
-                            />
-                            {selectedProvider === 'GEMINI' && (
-                                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 5 }}>
-                                    Get your key at{' '}
-                                    <a
-                                        href="https://aistudio.google.com/apikey"
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        style={{ color: '#4285f4' }}
-                                    >
-                                        aistudio.google.com/apikey
-                                    </a>
-                                </p>
-                            )}
-                            {selectedProvider === 'QWEN' && (
-                                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 5 }}>
-                                    Get your DashScope API key at{' '}
-                                    <a
-                                        href="https://dashscope-intl.aliyuncs.com"
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        style={{ color: '#6240da' }}
-                                    >
-                                        dashscope-intl.aliyuncs.com
-                                    </a>
-                                </p>
-                            )}
-                            {selectedProvider === 'DEEPSEEK' && (
-                                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 5 }}>
-                                    Get your API key at{' '}
-                                    <a
-                                        href="https://platform.deepseek.com/api_keys"
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        style={{ color: '#00d4c8' }}
-                                    >
-                                        platform.deepseek.com
-                                    </a>
-                                </p>
                             )}
                         </div>
 
-                        <div>
-                            <label style={{ display: 'block', marginBottom: 8, fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                                Model *
-                            </label>
-                            <select
-                                className="select-field"
-                                value={model}
-                                onChange={(e) => setModel(e.target.value)}
-                            >
-                                {PROVIDER_MODELS[selectedProvider].map((m) => (
-                                    <option key={m} value={m}>{MODEL_DISPLAY_NAMES[m] ?? m}</option>
-                                ))}
-                            </select>
-                            {selectedProvider === 'GEMINI' && (
-                                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 5 }}>
-                                    💡 Recommended: <strong style={{ color: '#4285f4' }}>gemini-2.5-flash-lite/*</strong> — fastest & most capable free-tier model
-                                </p>
-                            )}
-                            {selectedProvider === 'DEEPSEEK' && (
-                                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 5 }}>
-                                    💡 Recommended: <strong style={{ color: '#00d4c8' }}>deepseek-chat</strong> — High performance frontier model (DeepSeek-V3)
-                                </p>
-                            )}
+                        {/* Provider selection pills */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
+                            {PROVIDERS.map((p) => {
+                                const active = selectedProvider === p;
+                                const color = PROVIDER_COLORS[p];
+                                return (
+                                    <button
+                                        key={p}
+                                        onClick={() => handleProviderChange(p)}
+                                        style={{
+                                            padding: '8px 12px',
+                                            borderRadius: 8,
+                                            border: '1px solid',
+                                            borderColor: active ? color : 'var(--border)',
+                                            background: active ? `${color}15` : 'transparent',
+                                            color: active ? color : 'var(--text-muted)',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 6,
+                                            transition: 'all 0.2s',
+                                        }}
+                                    >
+                                        <span>{PROVIDER_ICONS[p]}</span>
+                                        <span>{PROVIDER_LABELS[p]}</span>
+                                    </button>
+                                );
+                            })}
                         </div>
 
-                        <div>
-                            <label style={{ display: 'block', marginBottom: 6, fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                                Label (optional)
-                            </label>
-                            <input
-                                className="input-field"
-                                type="text"
-                                placeholder={`e.g. My ${PROVIDER_LABELS[selectedProvider]} Key`}
-                                value={label}
-                                onChange={(e) => setLabel(e.target.value)}
-                            />
-                        </div>
+                        <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            <div style={{ position: 'relative' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                    <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>API KEY</label>
+                                    <div style={{ display: 'flex', gap: 6 }}>
+                                        {devKeys[selectedProvider] && (
+                                            <button
+                                                type="button"
+                                                onClick={fillDevKey}
+                                                style={{
+                                                    fontSize: '0.65rem',
+                                                    background: 'var(--accent-purple)',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: 4,
+                                                    padding: '2px 6px',
+                                                    cursor: 'pointer',
+                                                    opacity: 0.8
+                                                }}
+                                            >
+                                                🧪 Local Key
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <div style={{ position: 'relative' }}>
+                                    <input
+                                        className="input-field"
+                                        type={showApiKey ? 'text' : 'password'}
+                                        placeholder="Enter your API Key..."
+                                        value={apiKey}
+                                        onChange={(e) => setApiKey(e.target.value)}
+                                        required
+                                        style={{ padding: '10px 40px 10px 12px', fontSize: '0.85rem', width: '100%', boxSizing: 'border-box' }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowApiKey(!showApiKey)}
+                                        title={showApiKey ? 'Hide key' : 'Show key'}
+                                        style={{
+                                            position: 'absolute',
+                                            right: 10,
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            background: 'none',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            fontSize: '1rem',
+                                            color: 'var(--text-muted)',
+                                            lineHeight: 1,
+                                            padding: 0
+                                        }}
+                                    >
+                                        {showApiKey ? '🙈' : '👁️'}
+                                    </button>
+                                </div>
+                            </div>
 
-                        {message && (
-                            <div
-                                style={{
-                                    background: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                                    border: `1px solid ${message.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-                                    borderRadius: 8,
-                                    padding: '10px 14px',
+                            <div>
+                                <label style={{ display: 'block', marginBottom: 6, fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>MODEL</label>
+                                <select
+                                    className="select-field"
+                                    value={model}
+                                    onChange={(e) => setModel(e.target.value)}
+                                    style={{ padding: '10px 12px', fontSize: '0.85rem' }}
+                                >
+                                    {PROVIDER_MODELS[selectedProvider].map((m) => (
+                                        <option key={m} value={m}>{MODEL_DISPLAY_NAMES[m] ?? m}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label style={{ display: 'block', marginBottom: 6, fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>IDENTIFIER (OPTIONAL)</label>
+                                <input
+                                    className="input-field"
+                                    type="text"
+                                    placeholder="e.g. Production, Experiments..."
+                                    value={label}
+                                    onChange={(e) => setLabel(e.target.value)}
+                                    style={{ padding: '10px 12px', fontSize: '0.85rem' }}
+                                />
+                            </div>
+
+                            {message && (
+                                <div style={{
+                                    fontSize: '0.75rem',
                                     color: message.type === 'success' ? '#10b981' : '#ef4444',
-                                    fontSize: '0.85rem',
+                                    padding: '8px 12px',
+                                    borderRadius: 6,
+                                    background: message.type === 'success' ? 'rgba(16,185,129,0.05)' : 'rgba(239,68,68,0.05)',
+                                    border: `1px solid ${message.type === 'success' ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`
+                                }}>
+                                    {message.text}
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                className="btn-primary"
+                                disabled={saving}
+                                style={{
+                                    padding: '12px',
+                                    borderRadius: 8,
+                                    fontWeight: 700,
+                                    background: PROVIDER_COLORS[selectedProvider],
+                                    color: 'white',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontSize: '0.85rem'
                                 }}
                             >
-                                {message.text}
+                                {saving ? 'SAVING...' : editingId ? 'UPDATE BRICK' : 'ADD BRICK'}
+                            </button>
+                        </form>
+
+                        {/* Provider-specific help */}
+                        {selectedProvider && (
+                            <div
+                                style={{
+                                    marginTop: 20,
+                                    background: 'rgba(255,255,255,0.03)',
+                                    border: `1px solid var(--border)`,
+                                    borderRadius: 12,
+                                    padding: '12px 14px',
+                                }}
+                            >
+                                <div style={{ fontWeight: 600, fontSize: '0.75rem', color: PROVIDER_COLORS[selectedProvider], marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span>{PROVIDER_ICONS[selectedProvider]}</span>
+                                    <span>{PROVIDER_LABELS[selectedProvider]} Tips</span>
+                                </div>
+                                <ul style={{ color: 'var(--text-muted)', fontSize: '0.7rem', lineHeight: 1.6, paddingLeft: 12, margin: 0 }}>
+                                    {selectedProvider === 'OPENAI' && (
+                                        <>
+                                            <li>Manage keys at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>platform.openai.com</a></li>
+                                            <li>Keys start with <code>sk-</code></li>
+                                        </>
+                                    )}
+                                    {selectedProvider === 'GEMINI' && (
+                                        <>
+                                            <li>Free keys at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>aistudio.google.com</a></li>
+                                            <li>Keys start with <code>AIza</code></li>
+                                        </>
+                                    )}
+                                    {selectedProvider === 'QWEN' && (
+                                        <>
+                                            <li>Keys at <a href="https://dashscope-intl.aliyuncs.com" target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>dashscope-intl.aliyuncs.com</a></li>
+                                            <li>Keys start with <code>sk-</code></li>
+                                        </>
+                                    )}
+                                    {selectedProvider === 'DEEPSEEK' && (
+                                        <>
+                                            <li>Keys at <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>platform.deepseek.com</a></li>
+                                            <li>Keys start with <code>sk-</code></li>
+                                        </>
+                                    )}
+                                    <li>Test fails? Check model API tier support.</li>
+                                </ul>
                             </div>
                         )}
-
-                        <button type="submit" className="btn-primary" disabled={saving} style={{ padding: '12px' }}>
-                            <span>{saving ? 'Saving...' : `Save ${PROVIDER_LABELS[selectedProvider]} Connection`}</span>
-                        </button>
-                    </form>
+                    </div>
                 </div>
 
-                {/* Current connections */}
-                <div>
-                    <h2 style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 16, fontFamily: 'Space Grotesk, sans-serif' }}>
-                        Your Connections
-                    </h2>
+                {/* Connections Grid */}
+                {connections.length > 0 && (
+                    <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <h2 style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                Active Fleet ({connections.length})
+                            </h2>
+                        </div>
 
-                    {loading ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                            {[1, 2].map((i) => <div key={i} className="shimmer" style={{ height: 110 }} />)}
-                        </div>
-                    ) : connections.length === 0 ? (
-                        <div className="glass-card" style={{ padding: 32, textAlign: 'center', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-                            <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>🔌</div>
-                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                                No connections yet. Add your first AI above.
-                            </p>
-                        </div>
-                    ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
                             {connections.map((conn) => {
                                 const color = PROVIDER_COLORS[conn.provider as AIProvider] || '#7c5cfc';
-                                const tr = testResult[conn.provider];
-                                const isTesting = testing === conn.provider;
+                                const tr = testResult[conn.id];
+                                const isTesting = testing === conn.id;
+                                const isOnline = tr?.valid === true;
+                                const isFailed = tr?.valid === false;
+                                const isEditing = editingId === conn.id;
+
                                 return (
-                                    <div key={conn.id} className="glass-card" style={{ padding: '18px 20px', background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-                                        {/* Header row */}
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                                            <div
-                                                style={{
-                                                    width: 40,
-                                                    height: 40,
-                                                    borderRadius: 10,
-                                                    background: `${color}20`,
-                                                    border: `1px solid ${color}40`,
+                                    <div
+                                        key={conn.id}
+                                        style={{
+                                            borderRadius: 16,
+                                            border: isEditing ? `1.5px solid ${color}` : '1px solid var(--border)',
+                                            background: 'var(--bg-card)',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            overflow: 'hidden',
+                                            transition: 'box-shadow 0.2s, transform 0.2s',
+                                            boxShadow: isEditing ? `0 0 16px ${color}30` : '0 4px 16px rgba(0,0,0,0.12)',
+                                        }}
+                                    >
+                                        {/* Gradient accent bar at top */}
+                                        <div style={{
+                                            height: 4,
+                                            background: `linear-gradient(90deg, ${color}, ${color}60)`,
+                                        }} />
+
+                                        <div style={{ padding: '16px 16px 14px' }}>
+                                            {/* Provider icon + name row */}
+                                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                                                <div style={{
+                                                    width: 44,
+                                                    height: 44,
+                                                    borderRadius: 12,
+                                                    background: `${color}18`,
+                                                    border: `1px solid ${color}30`,
+                                                    color: color,
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     justifyContent: 'center',
-                                                    fontSize: '1.3rem',
+                                                    fontSize: '1.5rem',
                                                     flexShrink: 0,
-                                                    color,
-                                                }}
-                                            >
-                                                {PROVIDER_ICONS[conn.provider as AIProvider]}
-                                            </div>
-                                            <div style={{ flex: 1 }}>
-                                                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-                                                    {PROVIDER_LABELS[conn.provider as AIProvider]}
+                                                }}>
+                                                    {PROVIDER_ICONS[conn.provider as AIProvider]}
+                                                </div>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    {/* Full provider name */}
+                                                    <div style={{ fontWeight: 800, fontSize: '0.95rem', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
+                                                        {PROVIDER_LABELS[conn.provider as AIProvider]}
+                                                    </div>
+                                                    {/* Label (identifier) */}
                                                     {conn.label && (
-                                                        <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>
-                                                            {' '}· {conn.label}
-                                                        </span>
+                                                        <div style={{
+                                                            fontSize: '0.7rem',
+                                                            color: color,
+                                                            fontWeight: 600,
+                                                            marginTop: 2,
+                                                            opacity: 0.9,
+                                                            letterSpacing: '0.02em',
+                                                            textTransform: 'uppercase',
+                                                        }}>
+                                                            {conn.label}
+                                                        </div>
                                                     )}
                                                 </div>
-                                                <div style={{ color: color, fontSize: '0.75rem', marginTop: 2, fontWeight: 500 }}>
-                                                    {conn.model}
+                                                {/* Status pill */}
+                                                <div style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: 5,
+                                                    padding: '4px 8px',
+                                                    borderRadius: 20,
+                                                    fontSize: '0.65rem',
+                                                    fontWeight: 700,
+                                                    letterSpacing: '0.03em',
+                                                    background: isOnline ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.05)',
+                                                    color: isOnline ? '#10b981' : 'var(--text-muted)',
+                                                    border: isOnline ? '1px solid rgba(16,185,129,0.25)' : '1px solid var(--border)',
+                                                    flexShrink: 0,
+                                                }}>
+                                                    <span style={{
+                                                        width: 5, height: 5, borderRadius: '50%',
+                                                        background: isOnline ? '#10b981' : isFailed ? '#ef4444' : '#6b7280',
+                                                        display: 'inline-block'
+                                                    }} />
+                                                    {isOnline ? 'Online' : isFailed ? 'Error' : 'Idle'}
                                                 </div>
                                             </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                <div
-                                                    style={{
-                                                        width: 7,
-                                                        height: 7,
-                                                        borderRadius: '50%',
-                                                        background: conn.isActive ? '#10b981' : '#ef4444',
-                                                    }}
-                                                />
-                                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                                    {conn.isActive ? 'Active' : 'Inactive'}
-                                                </span>
-                                            </div>
-                                        </div>
 
-                                        {/* Test error message */}
-                                        {tr && tr.valid === false && tr.error && (
-                                            <div
-                                                style={{
-                                                    background: 'rgba(239,68,68,0.07)',
-                                                    border: '1px solid rgba(239,68,68,0.2)',
-                                                    borderRadius: 8,
-                                                    padding: '8px 12px',
-                                                    marginBottom: 10,
-                                                    fontSize: '0.76rem',
+                                            {/* Model chip */}
+                                            <div style={{
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: 5,
+                                                padding: '4px 10px',
+                                                borderRadius: 6,
+                                                background: `${color}10`,
+                                                border: `1px solid ${color}25`,
+                                                fontSize: '0.68rem',
+                                                fontWeight: 600,
+                                                color,
+                                                marginBottom: 14,
+                                                fontFamily: 'monospace',
+                                                letterSpacing: '0.02em',
+                                            }}>
+                                                ⚙ {conn.model}
+                                            </div>
+
+                                            {/* Error message */}
+                                            {isFailed && tr.error && (
+                                                <div style={{
+                                                    fontSize: '0.68rem',
                                                     color: '#fca5a5',
-                                                    lineHeight: 1.5,
-                                                }}
-                                            >
-                                                <strong>Error:</strong> {tr.error.slice(0, 180)}
-                                                {tr.error.length > 180 ? '...' : ''}
-                                                <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
-                                                    💡 Try updating this connection with a different model or re-entering your API key.
+                                                    marginBottom: 10,
+                                                    padding: '6px 10px',
+                                                    background: 'rgba(239,68,68,0.06)',
+                                                    borderRadius: 6,
+                                                    border: '1px solid rgba(239,68,68,0.15)',
+                                                    lineHeight: 1.4
+                                                }}>
+                                                    {tr.error.slice(0, 70)}{tr.error.length > 70 ? '…' : ''}
                                                 </div>
-                                            </div>
-                                        )}
+                                            )}
 
-                                        {/* Action buttons */}
-                                        <div style={{ display: 'flex', gap: 8 }}>
-                                            <button
-                                                className="btn-secondary"
-                                                onClick={() => handleTest(conn.provider)}
-                                                disabled={isTesting}
-                                                style={{ flex: 1, padding: '7px', fontSize: '0.8rem' }}
-                                            >
-                                                {isTesting
-                                                    ? '⏳ Testing...'
-                                                    : tr?.valid === true
-                                                        ? '✅ Valid'
-                                                        : tr?.valid === false
-                                                            ? '❌ Invalid — Retry'
-                                                            : '🔍 Test Key'}
-                                            </button>
-                                            <button
-                                                onClick={() => handleEdit(conn)}
-                                                style={{
-                                                    padding: '7px 14px',
-                                                    borderRadius: 8,
-                                                    border: `1px solid ${color}40`,
-                                                    background: `${color}10`,
-                                                    color,
-                                                    cursor: 'pointer',
-                                                    fontSize: '0.8rem',
-                                                    fontFamily: 'Inter, sans-serif',
-                                                }}
-                                            >
-                                                ✏️ Update
-                                            </button>
-                                            <button
-                                                onClick={() => handleDelete(conn.id, conn.provider)}
-                                                style={{
-                                                    padding: '7px 12px',
-                                                    borderRadius: 8,
-                                                    border: '1px solid rgba(239,68,68,0.2)',
-                                                    background: 'rgba(239,68,68,0.05)',
-                                                    color: '#ef4444',
-                                                    cursor: 'pointer',
-                                                    fontSize: '0.8rem',
-                                                    fontFamily: 'Inter, sans-serif',
-                                                }}
-                                            >
-                                                🗑
-                                            </button>
+                                            {/* Action row */}
+                                            <div style={{ display: 'flex', gap: 6 }}>
+                                                <button
+                                                    onClick={() => handleTest(conn.id)}
+                                                    disabled={isTesting}
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '8px',
+                                                        borderRadius: 8,
+                                                        border: '1px solid var(--border)',
+                                                        background: isOnline ? 'rgba(16,185,129,0.06)' : 'rgba(255,255,255,0.04)',
+                                                        color: isOnline ? '#10b981' : 'var(--text-muted)',
+                                                        fontSize: '0.72rem',
+                                                        fontWeight: 600,
+                                                        cursor: isTesting ? 'default' : 'pointer',
+                                                        transition: 'all 0.2s'
+                                                    }}
+                                                >
+                                                    {isTesting ? '⏳ Testing...' : isOnline ? '✓ Online' : isFailed ? '↺ Retry' : 'Test'}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleEdit(conn)}
+                                                    title="Edit connection"
+                                                    style={{
+                                                        padding: '8px 10px',
+                                                        borderRadius: 8,
+                                                        border: `1px solid ${color}30`,
+                                                        background: `${color}0d`,
+                                                        color,
+                                                        cursor: 'pointer',
+                                                        fontSize: '0.82rem',
+                                                    }}
+                                                >
+                                                    ✏️
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDelete(conn.id)}
+                                                    title="Delete connection"
+                                                    style={{
+                                                        padding: '8px 10px',
+                                                        borderRadius: 8,
+                                                        border: '1px solid rgba(239,68,68,0.2)',
+                                                        background: 'rgba(239,68,68,0.05)',
+                                                        color: '#ef4444',
+                                                        cursor: 'pointer',
+                                                        fontSize: '0.82rem',
+                                                    }}
+                                                >
+                                                    🗑️
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 );
                             })}
                         </div>
-                    )}
-
-                    {/* Provider-specific help */}
-                    {selectedProvider && (
-                        <div
-                            style={{
-                                marginTop: 16,
-                                background: `${PROVIDER_COLORS[selectedProvider]}08`,
-                                border: `1px solid ${PROVIDER_COLORS[selectedProvider]}30`,
-                                borderRadius: 12,
-                                padding: '14px 16px',
-                            }}
-                        >
-                            <div style={{ fontWeight: 600, fontSize: '0.82rem', color: PROVIDER_COLORS[selectedProvider], marginBottom: 6 }}>
-                                {PROVIDER_ICONS[selectedProvider]} {PROVIDER_LABELS[selectedProvider]} API Key Tips
-                            </div>
-                            <ul style={{ color: 'var(--text-muted)', fontSize: '0.78rem', lineHeight: 1.7, paddingLeft: 16 }}>
-                                {selectedProvider === 'OPENAI' && (
-                                    <>
-                                        <li>Manage your keys at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" style={{ color: PROVIDER_COLORS.OPENAI }}>platform.openai.com</a></li>
-                                        <li>Usage is pay-as-you-go; ensure you have credits in your account</li>
-                                        <li>Keys start with <code style={{ background: 'rgba(255,255,255,0.05)', padding: '1px 4px', borderRadius: 3 }}>sk-</code></li>
-                                    </>
-                                )}
-                                {selectedProvider === 'GEMINI' && (
-                                    <>
-                                        <li>Get your free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: PROVIDER_COLORS.GEMINI }}>aistudio.google.com/apikey</a></li>
-                                        <li>Use <strong style={{ color: 'var(--text-secondary)' }}>gemini-2.5-flash-lite</strong> — available for free</li>
-                                        <li>Keys start with <code style={{ background: 'rgba(255,255,255,0.05)', padding: '1px 4px', borderRadius: 3 }}>AIza</code></li>
-                                    </>
-                                )}
-                                {selectedProvider === 'QWEN' && (
-                                    <>
-                                        <li>Get your key at <a href="https://dashscope-intl.aliyuncs.com" target="_blank" rel="noreferrer" style={{ color: PROVIDER_COLORS.QWEN }}>dashscope-intl.aliyuncs.com</a></li>
-                                        <li>Use <strong style={{ color: 'var(--text-secondary)' }}>qwen-plus</strong> for the best balanced performance</li>
-                                        <li>Keys start with <code style={{ background: 'rgba(255,255,255,0.05)', padding: '1px 4px', borderRadius: 3 }}>sk-</code></li>
-                                    </>
-                                )}
-                                {selectedProvider === 'DEEPSEEK' && (
-                                    <>
-                                        <li>Get your key at <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer" style={{ color: PROVIDER_COLORS.DEEPSEEK }}>platform.deepseek.com</a></li>
-                                        <li>Highly recommended: <strong style={{ color: 'var(--text-secondary)' }}>deepseek-chat</strong> (V3) or <strong style={{ color: 'var(--text-secondary)' }}>deepseek-reasoner</strong> (R1)</li>
-                                        <li>Keys start with <code style={{ background: 'rgba(255,255,255,0.05)', padding: '1px 4px', borderRadius: 3 }}>sk-</code></li>
-                                    </>
-                                )}
-                                <li>If a test connection fails, verify you have chosen a model supported by your API key tier</li>
-                            </ul>
-                        </div>
-                    )}
-                </div>
+                    </div>
+                )}
             </div>
         </div>
     );

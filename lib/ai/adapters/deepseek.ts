@@ -31,9 +31,32 @@ export const deepSeekAdapter: AIAdapter = {
             })) as any,
             stream: true,
         });
+
+        let hasStartedThinking = false;
+        let hasFinishedThinking = false;
+
         for await (const chunk of stream) {
-            const delta = chunk.choices[0]?.delta?.content;
-            if (delta) yield delta;
+            const delta = chunk.choices[0]?.delta as any; // Cast for reasoning_content support
+            
+            // DeepSeek Reasoner outputs CoT in `reasoning_content`
+            if (delta?.reasoning_content) {
+                if (!hasStartedThinking) {
+                    hasStartedThinking = true;
+                    yield '<think>\n';
+                }
+                yield delta.reasoning_content;
+            } else if (delta?.content) {
+                if (hasStartedThinking && !hasFinishedThinking) {
+                    hasFinishedThinking = true;
+                    yield '\n</think>\n\n';
+                }
+                yield delta.content;
+            }
+        }
+        
+        // Failsafe in case stream ended without content but had reasoning
+        if (hasStartedThinking && !hasFinishedThinking) {
+            yield '\n</think>\n\n';
         }
     },
 
