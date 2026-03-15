@@ -12,11 +12,11 @@ export async function POST(req: NextRequest) {
         return new Response('Unauthorized', { status: 401 });
     }
 
-    const { conversationId, masterProvider, slaveProviders, message, history, researchMode } = await req.json();
+    const { conversationId, masterConnectionId, slaveConnectionIds, message, history, researchMode } = await req.json();
 
     // Fetch master connection
     const masterConn = await prisma.aIConnection.findUnique({
-        where: { userId_provider: { userId: session.user.id, provider: masterProvider } },
+        where: { id: masterConnectionId, userId: session.user.id }
     });
 
     if (!masterConn) {
@@ -25,9 +25,9 @@ export async function POST(req: NextRequest) {
 
     // Fetch slave connections
     const slaveConns = await Promise.all(
-        (slaveProviders as string[]).map((p) =>
+        (slaveConnectionIds as string[]).map((id) =>
             prisma.aIConnection.findUnique({
-                where: { userId_provider: { userId: session.user.id, provider: p } },
+                where: { id, userId: session.user.id }
             })
         )
     );
@@ -46,12 +46,12 @@ export async function POST(req: NextRequest) {
         // Upsert orchestration config
         await prisma.orchestrationConfig.upsert({
             where: { conversationId },
-            update: { masterProvider, slaveProviders: JSON.stringify(slaveProviders) },
+            update: { masterProvider: masterConn.provider, slaveProviders: JSON.stringify(slaveConns.map(c => c!.provider)) },
             create: {
                 userId: session.user.id,
                 conversationId,
-                masterProvider,
-                slaveProviders: JSON.stringify(slaveProviders),
+                masterProvider: masterConn.provider,
+                slaveProviders: JSON.stringify(slaveConns.map(c => c!.provider)),
             },
         });
     }
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         async start(controller) {
             try {
                 const gen = runOrchestration({
-                    masterProvider: masterProvider as AIProvider,
+                    masterProvider: masterConn.provider as AIProvider,
                     masterApiKey: decryptApiKey(masterConn.encryptedApiKey),
                     masterModel: masterConn.model,
                     slaves: validSlaves.map((c) => ({
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
                                 conversationId,
                                 role: 'master',
                                 content: thinking,
-                                provider: masterProvider,
+                                provider: masterConn.provider,
                                 thinkingStep: true,
                             },
                         });
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
                                 conversationId,
                                 role: 'master',
                                 content: finalAnswer,
-                                provider: masterProvider,
+                                provider: masterConn.provider,
                                 thinkingStep: false,
                             },
                         });

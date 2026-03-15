@@ -10,15 +10,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { provider, model: overrideModel } = await req.json();
+    const { connectionId, model: overrideModel } = await req.json();
 
     const connection = await prisma.aIConnection.findUnique({
-        where: {
-            userId_provider: {
-                userId: session.user.id,
-                provider,
-            },
-        },
+        where: { id: connectionId, userId: session.user.id }
     });
 
     if (!connection) {
@@ -27,14 +22,14 @@ export async function POST(req: NextRequest) {
 
     const apiKey = decryptApiKey(connection.encryptedApiKey);
     const testModel = overrideModel || connection.model;
-    const adapter = getAdapter(provider as AIProvider);
+    const adapter = getAdapter(connection.provider as AIProvider);
 
     try {
         const valid = await adapter.testConnection(apiKey, testModel);
         return NextResponse.json({ valid, model: testModel });
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[Connection Test] ${provider} error:`, message);
+        console.error(`[Connection Test] ${connection.provider} error:`, message);
         return NextResponse.json({ valid: false, error: message, model: testModel });
     }
 }

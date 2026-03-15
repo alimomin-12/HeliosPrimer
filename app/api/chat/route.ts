@@ -11,10 +11,10 @@ export async function POST(req: NextRequest) {
         return new Response('Unauthorized', { status: 401 });
     }
 
-    const { conversationId, provider, message, history } = await req.json();
+    const { conversationId, connectionId, message, history } = await req.json();
 
     const connection = await prisma.aIConnection.findUnique({
-        where: { userId_provider: { userId: session.user.id, provider } },
+        where: { id: connectionId, userId: session.user.id },
     });
 
     if (!connection || !connection.isActive) {
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     }
 
     const apiKey = decryptApiKey(connection.encryptedApiKey);
-    const adapter = getAdapter(provider as AIProvider);
+    const adapter = getAdapter(connection.provider as AIProvider);
 
     const messages: ChatMessage[] = [
         ...(history || []),
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
                             conversationId,
                             role: 'master',
                             content: fullResponse,
-                            provider,
+                            provider: connection.provider,
                         },
                     });
                     // Update conversation title from first message
