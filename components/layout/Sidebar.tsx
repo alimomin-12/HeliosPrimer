@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import ThemeSelector from '@/components/theme/ThemeSelector';
+import { CURRENT_ORCHESTRATOR_VERSION } from '@/lib/ai/orchestratorVersions';
 
 const NAV_ITEMS = [
     { href: '/dashboard', label: 'Dashboard', icon: '⊞' },
     { href: '/connect', label: 'Connect AIs', icon: '🔗' },
     { href: '/chat', label: 'New Chat', icon: '💬' },
     { href: '/history', label: 'History', icon: '🕐' },
+    { href: '/orchestrator-changelog', label: 'Versions', icon: '📜' },
 ];
 
 export default function Sidebar() {
@@ -47,7 +49,7 @@ export default function Sidebar() {
                         <div style={{ fontWeight: 700, fontSize: '0.95rem', fontFamily: 'Space Grotesk, sans-serif' }}>
                             HeliosPrimer
                         </div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>AI Hub</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, marginTop: 1 }}>{CURRENT_ORCHESTRATOR_VERSION.name}</div>
                     </div>
                 </div>
             </div>
