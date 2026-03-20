@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { PROVIDER_LABELS, PROVIDER_COLORS, type AIProvider } from '@/lib/ai/registry';
 import { extractArtifacts, downloadAsFile, downloadAsPdf, type Artifact } from '@/lib/artifacts';
 import { renderMarkdownText } from '@/lib/markdownRenderer';
+import { CURRENT_ORCHESTRATOR_VERSION } from '@/lib/ai/orchestratorVersions';
 
 interface AIConnection {
     id: string;
@@ -139,6 +140,15 @@ function ChatContent() {
     const removeAttachment = (index: number) => {
         setAttachments((prev) => prev.filter((_, i) => i !== index));
     };
+
+    // Auto-resize input textarea
+    useEffect(() => {
+        if (inputRef.current) {
+            inputRef.current.style.height = '44px';
+            const scrollHeight = inputRef.current.scrollHeight;
+            inputRef.current.style.height = `${scrollHeight}px`;
+        }
+    }, [input]);
 
     // Update token stats whenever messages change
     useEffect(() => {
@@ -301,13 +311,13 @@ function ChatContent() {
             role: 'user',
             content: attachments.length > 0
                 ? [
-                      { type: 'text', text: userMsg },
-                      ...attachments.map(a => 
-                          a.isImage 
-                          ? { type: 'image_url' as const, image_url: { url: a.data } }
-                          : { type: 'text' as const, text: `[ATTACHMENT:${a.name};type=${a.type};data=${a.data}]` }
-                      )
-                  ]
+                    { type: 'text', text: userMsg },
+                    ...attachments.map(a =>
+                        a.isImage
+                            ? { type: 'image_url' as const, image_url: { url: a.data } }
+                            : { type: 'text' as const, text: `[ATTACHMENT:${a.name};type=${a.type};data=${a.data}]` }
+                    )
+                ]
                 : userMsg,
             type: 'user',
         };
@@ -480,6 +490,7 @@ function ChatContent() {
 
     // ─── ArtifactPanel ───────────────────────────────────────────────────────
     function ArtifactPanel() {
+        const [artifactMode, setArtifactMode] = useState<'preview' | 'raw'>('preview');
         if (artifacts.length === 0) {
             return (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 40, color: 'var(--text-muted)' }}>
@@ -535,23 +546,43 @@ function ChatContent() {
 
                         {/* Expanded preview */}
                         {expandedArtifact === a.id && (
-                            <pre
-                                style={{
-                                    margin: 0,
-                                    padding: 14,
-                                    fontSize: '0.72rem',
-                                    lineHeight: 1.6,
-                                    overflowX: 'auto',
-                                    maxHeight: 280,
-                                    overflowY: 'auto',
-                                    background: '#0d0d1a',
-                                    color: '#e2e8f0',
-                                    fontFamily: "'Courier New', Courier, monospace",
-                                    borderRadius: 0,
-                                }}
-                            >
-                                <code>{a.content}</code>
-                            </pre>
+                            <div style={{ borderTop: '1px solid var(--border)' }}>
+                                {(a.language === 'markdown' || a.language === 'md' || a.type === 'markdown' || a.language === 'html') && (
+                                    <div style={{ display: 'flex', gap: 8, padding: '8px 14px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setArtifactMode('preview'); }}
+                                            style={{
+                                                background: artifactMode === 'preview' ? 'var(--accent-purple)' : 'transparent',
+                                                color: artifactMode === 'preview' ? 'white' : 'var(--text-muted)',
+                                                border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s'
+                                            }}
+                                        >Preview</button>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setArtifactMode('raw'); }}
+                                            style={{
+                                                background: artifactMode === 'raw' ? 'var(--accent-purple)' : 'transparent',
+                                                color: artifactMode === 'raw' ? 'white' : 'var(--text-muted)',
+                                                border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s'
+                                            }}
+                                        >Raw Code</button>
+                                    </div>
+                                )}
+                                <div style={{ 
+                                    maxHeight: 400, 
+                                    overflowY: 'auto', 
+                                    background: (artifactMode === 'raw' || !(a.language === 'markdown' || a.language === 'md' || a.type === 'markdown' || a.language === 'html')) ? '#0d0d1a' : 'var(--bg-primary)' 
+                                }}>
+                                    {(artifactMode === 'preview' && (a.language === 'markdown' || a.language === 'md' || a.type === 'markdown' || a.language === 'html')) ? (
+                                        <div style={{ padding: '20px 24px', fontSize: '0.9rem', color: 'var(--text-primary)', lineHeight: 1.7 }}>
+                                            {renderMarkdownText(a.content)}
+                                        </div>
+                                    ) : (
+                                        <pre style={{ margin: 0, padding: 16, fontSize: '0.75rem', lineHeight: 1.6, overflowX: 'auto', color: '#e2e8f0', fontFamily: "'Courier New', Courier, monospace" }}>
+                                            <code>{a.content}</code>
+                                        </pre>
+                                    )}
+                                </div>
+                            </div>
                         )}
 
                         {/* Download buttons */}
@@ -1276,11 +1307,16 @@ function ChatContent() {
                                                 fontFamily: 'Space Grotesk, sans-serif',
                                                 fontSize: '1.3rem',
                                                 fontWeight: 700,
-                                                marginBottom: 8,
+                                                marginBottom: mode === 'DIRECT' ? 8 : 4,
                                             }}
                                         >
                                             {mode === 'DIRECT' ? 'Direct Chat' : 'Orchestrated Chat'}
                                         </h2>
+                                        {mode === 'ORCHESTRATED' && (
+                                            <div style={{ fontSize: '0.85rem', color: 'var(--accent-purple)', fontWeight: 600, marginBottom: 16 }}>
+                                                {CURRENT_ORCHESTRATOR_VERSION.name}
+                                            </div>
+                                        )}
                                         <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: 400, margin: '0 auto', lineHeight: 1.6 }}>
                                             {mode === 'DIRECT'
                                                 ? `Chatting directly with ${PROVIDER_LABELS[selectedProviderStr as AIProvider] || selectedProviderStr}. Type a message to begin.`
@@ -1405,36 +1441,36 @@ function ChatContent() {
                                                                 if (m.index > lastIdx) {
                                                                     const textSeg = src.slice(lastIdx, m.index);
                                                                     parts.push(
-                                                                    <div key={`txt-${blockIdx}`}>
-                                                                        {(() => {
-                                                                            const textBody = textSeg;
-                                                                            const thinkStart = textBody.indexOf('<think>');
-                                                                            if (thinkStart !== -1) {
-                                                                                const thinkEnd = textBody.indexOf('</think>');
-                                                                                const isClosed = thinkEnd !== -1;
-                                                                                
-                                                                                const beforeThink = textBody.slice(0, thinkStart);
-                                                                                const thinkContent = isClosed ? textBody.slice(thinkStart + 7, thinkEnd).trim() : textBody.slice(thinkStart + 7).trim();
-                                                                                const afterThink = isClosed ? textBody.slice(thinkEnd + 8).trim() : '';
+                                                                        <div key={`txt-${blockIdx}`}>
+                                                                            {(() => {
+                                                                                const textBody = textSeg;
+                                                                                const thinkStart = textBody.indexOf('<think>');
+                                                                                if (thinkStart !== -1) {
+                                                                                    const thinkEnd = textBody.indexOf('</think>');
+                                                                                    const isClosed = thinkEnd !== -1;
 
-                                                                                return (
-                                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                                                                        {beforeThink && <div>{outputLayout === 'structured' ? renderMarkdownText(beforeThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{beforeThink}</span>}</div>}
-                                                                                        <details open={!isClosed} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: afterThink ? 8 : 0 }}>
-                                                                                            <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none' }}>
-                                                                                                <span>🧠</span> Thinking Process {!isClosed && <span className="pulse-dot" style={{ background: 'var(--text-muted)', width: 6, height: 6, marginLeft: 4 }} />}
-                                                                                            </summary>
-                                                                                            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'Inter,sans-serif', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                                                                                                {thinkContent || 'Thinking...'}
-                                                                                            </div>
-                                                                                        </details>
-                                                                                        {afterThink && <div>{outputLayout === 'structured' ? renderMarkdownText(afterThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{afterThink}</span>}</div>}
-                                                                                    </div>
-                                                                                );
-                                                                            }
-                                                                            return outputLayout === 'structured' ? renderMarkdownText(textSeg) : <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{textSeg}</span>;
-                                                                        })()}
-                                                                    </div>
+                                                                                    const beforeThink = textBody.slice(0, thinkStart);
+                                                                                    const thinkContent = isClosed ? textBody.slice(thinkStart + 7, thinkEnd).trim() : textBody.slice(thinkStart + 7).trim();
+                                                                                    const afterThink = isClosed ? textBody.slice(thinkEnd + 8).trim() : '';
+
+                                                                                    return (
+                                                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                                                                            {beforeThink && <div>{outputLayout === 'structured' ? renderMarkdownText(beforeThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{beforeThink}</span>}</div>}
+                                                                                            <details open={!isClosed} style={{ background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', marginBottom: afterThink ? 8 : 0 }}>
+                                                                                                <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, userSelect: 'none' }}>
+                                                                                                    <span>🧠</span> Thinking Process {!isClosed && <span className="pulse-dot" style={{ background: 'var(--text-muted)', width: 6, height: 6, marginLeft: 4 }} />}
+                                                                                                </summary>
+                                                                                                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)', fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'Inter,sans-serif', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                                                                                                    {thinkContent || 'Thinking...'}
+                                                                                                </div>
+                                                                                            </details>
+                                                                                            {afterThink && <div>{outputLayout === 'structured' ? renderMarkdownText(afterThink) : <span style={{ whiteSpace: 'pre-wrap' }}>{afterThink}</span>}</div>}
+                                                                                        </div>
+                                                                                    );
+                                                                                }
+                                                                                return outputLayout === 'structured' ? renderMarkdownText(textSeg) : <span style={{ whiteSpace: 'pre-wrap', display: 'block' }}>{textSeg}</span>;
+                                                                            })()}
+                                                                        </div>
                                                                     );
                                                                 }
                                                                 const lang = (m[1] || 'plaintext').trim().toLowerCase() || 'plaintext';
@@ -1532,7 +1568,7 @@ function ChatContent() {
                                                                             if (thinkStart !== -1) {
                                                                                 const thinkEnd = textBody.indexOf('</think>');
                                                                                 const isClosed = thinkEnd !== -1;
-                                                                                
+
                                                                                 const beforeThink = textBody.slice(0, thinkStart);
                                                                                 const thinkContent = isClosed ? textBody.slice(thinkStart + 7, thinkEnd).trim() : textBody.slice(thinkStart + 7).trim();
                                                                                 const afterThink = isClosed ? textBody.slice(thinkEnd + 8).trim() : '';
@@ -1564,7 +1600,7 @@ function ChatContent() {
                                                                     if (thinkStart !== -1) {
                                                                         const thinkEnd = textBody.indexOf('</think>');
                                                                         const isClosed = thinkEnd !== -1;
-                                                                        
+
                                                                         const beforeThink = textBody.slice(0, thinkStart);
                                                                         const thinkContent = isClosed ? textBody.slice(thinkStart + 7, thinkEnd).trim() : textBody.slice(thinkStart + 7).trim();
                                                                         const afterThink = isClosed ? textBody.slice(thinkEnd + 8).trim() : '';
@@ -1720,7 +1756,7 @@ function ChatContent() {
                                             fontSize: '0.9rem',
                                             resize: 'none',
                                             minHeight: 44,
-                                            maxHeight: 160,
+                                            maxHeight: '40vh',
                                             fontFamily: 'Inter, sans-serif',
                                             lineHeight: 1.6,
                                             paddingTop: 10,
