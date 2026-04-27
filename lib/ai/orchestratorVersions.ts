@@ -20,6 +20,13 @@ export const ORCHESTRATOR_VERSIONS: OrchestratorVersion[] = [
     date: "2026-03-20",
     summary: "Transformed orchestration to robust structured JSON objects.",
     features: ["JSON array task delegation", "Structured JSON slave adherence", "Fault-tolerant parsing fallbacks"]
+  },
+  {
+    version: "2.1.0",
+    name: "Nexus Core",
+    date: "2026-04-27",
+    summary: "Introduced dynamic markdown Skills system for enhanced contextual interactions.",
+    features: ["Slash-command trigger (/) for dynamic skill injection", "Markdown file uploading and parsing", "Visual attachment chip rendering for clean chat UI"]
   }
 ];
 

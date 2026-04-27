@@ -178,9 +178,23 @@ export async function* runOrchestration(
     }
 
     // ─── Phase 1: Force delegation planning ───────────────────────────────────
+    // Build a session context summary from recent history to help the master
+    // AI understand follow-up queries intelligently.
+    const recentTurns = cleanHistory.slice(-6); // last 3 pairs
+    const sessionContextBlock = recentTurns.length > 0
+        ? `[SESSION CONTEXT — last ${recentTurns.length} turns]\n` +
+        recentTurns.map(m => `[${m.role.toUpperCase()}]: ${getTextContent(m.content).slice(0, 500)}${getTextContent(m.content).length > 500 ? '...' : ''}`).join('\n') +
+        '\n[END SESSION CONTEXT]\n\n'
+        : '';
+
     const planMessages: ChatMessage[] = [
         { role: 'system', content: planPrompt.replace('{SLAVE_LIST}', slaveList) },
-        { role: 'user', content: userQuery },
+        {
+            role: 'user',
+            content: sessionContextBlock
+                ? `${sessionContextBlock}Current user query: ${getTextContent(userQuery)}`
+                : userQuery
+        },
     ];
 
     const masterThinking = await masterAdapter.chat(planMessages, masterApiKey, masterModel);

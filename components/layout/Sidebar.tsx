@@ -11,6 +11,7 @@ const NAV_ITEMS = [
     { href: '/connect', label: 'Connect AIs', icon: '🔗' },
     { href: '/chat', label: 'New Chat', icon: '💬' },
     { href: '/history', label: 'History', icon: '🕐' },
+    { href: '/skills', label: 'Skills', icon: '🧠' },
     { href: '/orchestrator-changelog', label: 'Versions', icon: '📜' },
 ];
 

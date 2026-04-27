@@ -10,6 +10,9 @@ export type AIProvider = 'OPENAI' | 'GEMINI' | 'QWEN' | 'DEEPSEEK';
 export const PROVIDER_MODELS: Record<AIProvider, string[]> = {
     OPENAI: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     GEMINI: [
+        // Gemini 3
+        'gemini-3.1-flash-lite-preview',
+        'gemini-3-flash-preview',
         // Gemini 2.5 — stable (latest generation)
         'gemini-2.5-flash',
         'gemini-2.5-flash-lite',

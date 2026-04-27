@@ -21,6 +21,7 @@ model User {
   aiConnections       AIConnection[]
   conversations       Conversation[]
   orchestrationConfigs OrchestrationConfig[]
+  skills               Skill[]
 }
 
 model Account {
@@ -111,3 +112,15 @@ model OrchestrationConfig {
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 }
+
+model Skill {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
