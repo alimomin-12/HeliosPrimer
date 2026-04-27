@@ -97,6 +97,8 @@ function ChatContent() {
     });
     const [showThinkingLogs, setShowThinkingLogs] = useState(false);
     const [attachments, setAttachments] = useState<{ name: string; type: string; data: string; isImage: boolean }[]>([]);
+    const [skills, setSkills] = useState<{ id: string; name: string; content: string }[]>([]);
+    const [showSkillMenu, setShowSkillMenu] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -178,6 +180,11 @@ function ChatContent() {
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [streamingDone]);
+
+    // Load skills
+    useEffect(() => {
+        fetch('/api/skills').then(r => r.ok ? r.json() : []).then(setSkills).catch(() => {});
+    }, []);
 
     // Load connections
     useEffect(() => {
@@ -300,6 +307,32 @@ function ChatContent() {
         return conv.id;
     }
 
+    // ─── Format-Conversion Intent Detector ────────────────────────────────────
+    // Detects requests like 'convert the above to markdown', handles them locally
+    // without any API call — zero tokens spent for format transformations.
+    function detectFormatIntent(msg: string): { detected: boolean; format: string; langTag: string } {
+        const lower = msg.toLowerCase();
+        const FORMAT_PATTERNS: Array<[RegExp, string, string]> = [
+            [/\b(markdown|md|.md)\b/, 'Markdown', 'markdown'],
+            [/\bjson\b/, 'JSON', 'json'],
+            [/\bhtml\b/, 'HTML', 'html'],
+            [/\bcsv\b/, 'CSV', 'csv'],
+            [/\byaml\b/, 'YAML', 'yaml'],
+            [/\bplain\s*text\b/, 'Plain Text', 'plaintext'],
+        ];
+        const TRIGGER_PHRASES = [
+            'convert', 'output', 'export', 'save as', 'make it', 'turn it into',
+            'format as', 'as a', 'in a', 'formatted', 'document',
+            'as file', 'above', 'previous', 'result', 'response', 'that'
+        ];
+        const hasTrigger = TRIGGER_PHRASES.some(p => lower.includes(p));
+        if (!hasTrigger) return { detected: false, format: '', langTag: '' };
+        for (const [pattern, format, langTag] of FORMAT_PATTERNS) {
+            if (pattern.test(lower)) return { detected: true, format, langTag };
+        }
+        return { detected: false, format: '', langTag: '' };
+    }
+
     async function sendMessage() {
         if (!input.trim() || streaming) return;
         const userMsg = input.trim();
@@ -333,6 +366,36 @@ function ChatContent() {
                 role: m.role === 'user' ? 'user' : 'assistant',
                 content: m.content,
             }));
+
+        // ── Local format-conversion intercept ──────────────────────────────────
+        // If the user is simply asking to reformat the last AI output, handle
+        // it entirely in the browser — no tokens, instant result.
+        const formatIntent = detectFormatIntent(typeof userMsg === 'string' ? userMsg : '');
+        if (formatIntent.detected && attachments.length === 0) {
+            const lastAI = [...messages].reverse().find(m => m.role === 'master' && m.type === 'final');
+            if (lastAI) {
+                const rawContent = getTextContent(lastAI.content);
+                // Wrap into the requested format codeblock so the markdown viewer picks it up
+                const wrappedContent = `\`\`\`${formatIntent.langTag}\n${rawContent}\n\`\`\``;
+                const localMsgId = Date.now().toString();
+                const pStr = connections.find(c => c.id === masterConnectionId)?.provider ||
+                    connections.find(c => c.id === selectedConnectionId)?.provider || 'Local';
+                setMessages(prev => [
+                    ...prev,
+                    {
+                        id: localMsgId,
+                        role: 'master',
+                        type: 'final',
+                        provider: pStr,
+                        content: `Here is the previous response formatted as a **${formatIntent.format}** document:\n\n${wrappedContent}`,
+                    }
+                ]);
+                setStreaming(false);
+                setStreamingDone(true);
+                return;
+            }
+        }
+        // ── End intercept ──────────────────────────────────────────────────────
 
         if (mode === 'DIRECT') {
             await runDirectChat(userChatMsg.content, convId, history);
@@ -470,9 +533,23 @@ function ChatContent() {
     }
 
     function handleKeyDown(e: React.KeyboardEvent) {
+        if (showSkillMenu && e.key === 'Escape') {
+            setShowSkillMenu(false);
+            return;
+        }
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             sendMessage();
+        }
+    }
+
+    function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+        const val = e.target.value;
+        setInput(val);
+        if (val.endsWith('/')) {
+            setShowSkillMenu(true);
+        } else if (!val.includes('/')) {
+            setShowSkillMenu(false);
         }
     }
 
@@ -567,10 +644,10 @@ function ChatContent() {
                                         >Raw Code</button>
                                     </div>
                                 )}
-                                <div style={{ 
-                                    maxHeight: 400, 
-                                    overflowY: 'auto', 
-                                    background: (artifactMode === 'raw' || !(a.language === 'markdown' || a.language === 'md' || a.type === 'markdown' || a.language === 'html')) ? '#0d0d1a' : 'var(--bg-primary)' 
+                                <div style={{
+                                    maxHeight: 400,
+                                    overflowY: 'auto',
+                                    background: (artifactMode === 'raw' || !(a.language === 'markdown' || a.language === 'md' || a.type === 'markdown' || a.language === 'html')) ? '#0d0d1a' : 'var(--bg-primary)'
                                 }}>
                                     {(artifactMode === 'preview' && (a.language === 'markdown' || a.language === 'md' || a.type === 'markdown' || a.language === 'html')) ? (
                                         <div style={{ padding: '20px 24px', fontSize: '0.9rem', color: 'var(--text-primary)', lineHeight: 1.7 }}>
@@ -1372,7 +1449,23 @@ function ChatContent() {
                                                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                                                                 {msg.content.map((part, i) => (
                                                                     <div key={i}>
-                                                                        {part.type === 'text' && part.text}
+                                                                        {part.type === 'text' && part.text && (
+                                                                            part.text.startsWith('[ATTACHMENT:') ? (
+                                                                                (() => {
+                                                                                    const match = part.text.match(/\[ATTACHMENT:(.*?);type=(.*?);data=([\s\S]*)\]/);
+                                                                                    if (match) {
+                                                                                        const name = match[1];
+                                                                                        return (
+                                                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.2)', padding: '8px 12px', borderRadius: 8, fontSize: '0.8rem', border: '1px solid rgba(255,255,255,0.15)', width: 'fit-content' }}>
+                                                                                                <span>📄</span>
+                                                                                                <span style={{ fontWeight: 600 }}>{name}</span>
+                                                                                            </div>
+                                                                                        );
+                                                                                    }
+                                                                                    return part.text;
+                                                                                })()
+                                                                            ) : part.text
+                                                                        )}
                                                                         {part.type === 'image_url' && part.image_url && (
                                                                             <img
                                                                                 src={part.image_url.url}
@@ -1495,6 +1588,57 @@ function ChatContent() {
                                                                 const fileName = `${fileTitle.replace(/\s+/g, '_')}.${ext}`;
                                                                 const lines = code.split('\n').length;
                                                                 const cardKey = `code-${msg.id}-${blockIdx++}`;
+
+                                                                // ── Inline Markdown Document Viewer ──────────────────────────────────
+                                                                if (lang === 'markdown' || lang === 'md') {
+                                                                    parts.push(
+                                                                        <div key={cardKey} style={{
+                                                                            margin: '14px 0',
+                                                                            border: '1px solid color-mix(in srgb, var(--accent-purple) 25%, var(--border))',
+                                                                            borderRadius: 14,
+                                                                            overflow: 'hidden',
+                                                                            background: 'var(--bg-primary)',
+                                                                            boxShadow: '0 4px 20px rgba(124,92,252,0.08)',
+                                                                        }}>
+                                                                            {/* Document header bar */}
+                                                                            <div style={{
+                                                                                display: 'flex', alignItems: 'center', gap: 10,
+                                                                                padding: '10px 16px',
+                                                                                background: 'color-mix(in srgb, var(--accent-purple) 8%, var(--bg-card))',
+                                                                                borderBottom: '1px solid color-mix(in srgb, var(--accent-purple) 20%, var(--border))',
+                                                                            }}>
+                                                                                <span style={{ fontSize: '1.05rem' }}>📄</span>
+                                                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                    <div style={{ fontWeight: 700, fontSize: '0.85rem', fontFamily: 'Space Grotesk,sans-serif' }}>Markdown Output</div>
+                                                                                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 1 }}>
+                                                                                        <span style={{ background: 'color-mix(in srgb, var(--accent-purple) 15%, transparent)', color: 'var(--accent-purple)', borderRadius: 4, padding: '1px 5px', fontWeight: 700, fontSize: '0.65rem' }}>markdown</span>
+                                                                                        <span style={{ marginLeft: 8 }}>{lines} lines</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <button
+                                                                                    onClick={() => downloadAsFile(fileName, code)}
+                                                                                    title="Download .md"
+                                                                                    style={{
+                                                                                        padding: '5px 12px', fontSize: '0.72rem', borderRadius: 8,
+                                                                                        border: '1px solid color-mix(in srgb, var(--accent-purple) 35%, transparent)',
+                                                                                        background: 'color-mix(in srgb, var(--accent-purple) 10%, transparent)',
+                                                                                        color: 'var(--accent-purple)', cursor: 'pointer',
+                                                                                        fontFamily: 'Inter,sans-serif', fontWeight: 700,
+                                                                                        display: 'flex', alignItems: 'center', gap: 4,
+                                                                                        transition: 'all 0.15s', flexShrink: 0,
+                                                                                    }}
+                                                                                >⬇ .md</button>
+                                                                            </div>
+                                                                            {/* Rendered markdown document body */}
+                                                                            <div style={{ padding: '24px 28px', fontSize: '0.95rem', lineHeight: 1.75, color: 'var(--text-primary)' }}>
+                                                                                {renderMarkdownText(code)}
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                    lastIdx = m.index + m[0].length;
+                                                                    continue;
+                                                                }
+
                                                                 parts.push(
                                                                     <div key={cardKey} style={{
                                                                         margin: '10px 0',
@@ -1669,8 +1813,60 @@ function ChatContent() {
                                     padding: '16px 20px',
                                     borderTop: '1px solid var(--border)',
                                     background: 'var(--bg-secondary)',
+                                    position: 'relative',
                                 }}
                             >
+                                {showSkillMenu && skills.length > 0 && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        bottom: 'calc(100% - 10px)',
+                                        left: 20,
+                                        background: 'var(--bg-card)',
+                                        border: '1px solid var(--border)',
+                                        borderRadius: 12,
+                                        padding: 8,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 4,
+                                        zIndex: 50,
+                                        width: 300,
+                                        boxShadow: 'var(--theme-shadow)',
+                                    }}>
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '4px 8px', fontWeight: 600 }}>ADD SKILL AS CONTEXT</div>
+                                        {skills.map(skill => (
+                                            <button
+                                                key={skill.id}
+                                                onClick={() => {
+                                                    setAttachments(prev => [
+                                                        ...prev,
+                                                        { name: skill.name + ' (Skill)', type: 'text/markdown', data: skill.content, isImage: false }
+                                                    ]);
+                                                    setInput(prev => prev.replace(/\/$/, ''));
+                                                    setShowSkillMenu(false);
+                                                    inputRef.current?.focus();
+                                                }}
+                                                style={{
+                                                    padding: '8px 12px',
+                                                    borderRadius: 8,
+                                                    border: 'none',
+                                                    background: 'transparent',
+                                                    color: 'var(--text-primary)',
+                                                    textAlign: 'left',
+                                                    cursor: 'pointer',
+                                                    fontSize: '0.85rem',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: 8,
+                                                }}
+                                                onMouseOver={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+                                                onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                                            >
+                                                <span>🧠</span> {skill.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+
                                 {/* Attachment Previews */}
                                 {attachments.length > 0 && (
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
@@ -1740,7 +1936,7 @@ function ChatContent() {
                                     <textarea
                                         ref={inputRef}
                                         value={input}
-                                        onChange={(e) => setInput(e.target.value)}
+                                        onChange={handleInputChange}
                                         onKeyDown={handleKeyDown}
                                         placeholder={
                                             mode === 'DIRECT'
